@@ -12,7 +12,10 @@ import android.view.WindowManager
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.SpringSpec
 import androidx.compose.animation.core.spring
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.padding
@@ -30,9 +33,6 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.awaitEachGesture
-import androidx.compose.ui.input.pointer.awaitFirstDown
-import androidx.compose.ui.input.pointer.waitForUpOrCancellation
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -51,7 +51,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.PI
 import kotlin.math.abs
-import kotlin.math.isFinite
 
 private const val DEADZONE_DEGREES = 1.5f
 private const val TILT_SCALE = 0.35f
@@ -214,7 +213,9 @@ fun ProvideTiltSensor(
                 // orientation[1] = pitch (X), orientation[2] = roll (Y), in radians.
                 val currentX = orientation[1]
                 val currentY = orientation[2]
-                if (!currentX.isFinite() || !currentY.isFinite()) return
+                if (currentX.isNaN() || currentX.isInfinite() ||
+                    currentY.isNaN() || currentY.isInfinite()
+                ) return
 
                 if (!referenceReady) {
                     referenceX = currentX
