@@ -8,6 +8,7 @@ import android.webkit.ValueCallback
 import android.webkit.WebView
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -28,6 +29,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -40,6 +42,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
+import kotlin.math.abs
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -95,6 +98,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -104,6 +108,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
@@ -111,6 +116,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -183,6 +189,33 @@ private fun siteIconFor(host: String): Int? = when {
     else -> null
 }
 
+/**
+ * Watches drag direction without consuming events, so the WebView and lazy
+ * lists still scroll normally. Dragging down reveals the nav panel; dragging
+ * up hides it while reading a long page.
+ */
+private fun Modifier.panelScrollWatcher(onScrollDown: (Boolean) -> Unit): Modifier =
+    pointerInput(Unit) {
+        awaitPointerEventScope {
+            while (true) {
+                val down = awaitPointerEvent(PointerEventPass.Initial)
+                val pointerId = down.changes.firstOrNull { it.pressed }?.id ?: continue
+                val startY = down.changes.first { it.id == pointerId }.position.y
+                var signaled = false
+                while (true) {
+                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                    val change = event.changes.firstOrNull { it.id == pointerId } ?: break
+                    if (!change.pressed) break
+                    val dy = change.position.y - startY
+                    if (!signaled && abs(dy) > 24f) {
+                        onScrollDown(dy > 0f)
+                        signaled = true
+                    }
+                }
+            }
+        }
+    }
+
 @Composable
 fun AMzBrowserRoot(
     initialUrl: String?,
@@ -213,6 +246,8 @@ fun AMzBrowserRoot(
     var toastMessage by remember { mutableStateOf<String?>(null) }
     var blockedRedirectUrl by remember { mutableStateOf<String?>(null) }
     var showTiltDebug by remember { mutableStateOf(false) }
+    var panelExpanded by remember { mutableStateOf(true) }
+    var panelHeightPx by remember { mutableIntStateOf(0) }
 
     fun showToast(msg: String) {
         toastMessage = msg
@@ -335,6 +370,20 @@ fun AMzBrowserRoot(
             val hazeState: HazeState? = if (activeTab.url.isBlank()) baseHazeState else null
             val fingerTracker = remember { FingerTracker() }
 
+            val density = LocalDensity.current
+            val measuredPanelHeight = with(density) { panelHeightPx.toDp() }
+            val panelShift by animateDpAsState(
+                targetValue = if (panelExpanded) 0.dp else measuredPanelHeight + 12.dp,
+                animationSpec = tween(220),
+                label = "panel collapse"
+            )
+            val visiblePanelHeight = (measuredPanelHeight - panelShift).coerceAtLeast(0.dp)
+            val contentBottomInset by animateDpAsState(
+                targetValue = visiblePanelHeight + 12.dp,
+                animationSpec = tween(220),
+                label = "content bottom inset"
+            )
+
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -349,51 +398,83 @@ fun AMzBrowserRoot(
                         }
                     }
             ) {
-                if (activeTab.url.isBlank()) {
-                    // Only the app-drawn aurora is a blur source.
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .hazeSource(baseHazeState)
-                    ) {
-                        AuroraBackground(fingerTracker = fingerTracker)
-                    }
-                    AMzStartPage(
-                        userName = settings.userName,
-                        isPrivate = activeTab.isPrivate,
-                        stats = shieldStats,
-                        history = history,
-                        gyroEnabled = settings.gyroTilt,
-                        hazeState = hazeState,
-                        onOpenUrl = { navigate(it) },
-                        showTiltDebug = showTiltDebug,
-                        onToggleTiltDebug = { showTiltDebug = !showTiltDebug }
-                    )
-                } else {
-                    val wv = activeTab.webView
-                    if (wv == null) {
-                        // ensureWebView writes to the tab StateFlow, so it must
-                        // never be called from a remember initializer during
-                        // composition (that schedules another recomposition).
-                        LaunchedEffect(activeTab.id) {
-                            ensureActiveWebView()
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(bottom = contentBottomInset)
+                        .panelScrollWatcher { scrollingDown -> panelExpanded = !scrollingDown }
+                ) {
+                    if (activeTab.url.isBlank()) {
+                        // Only the app-drawn aurora is a blur source.
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .hazeSource(baseHazeState)
+                        ) {
+                            AuroraBackground(fingerTracker = fingerTracker)
                         }
-                        Box(Modifier.fillMaxSize())
-                    } else {
-                        AndroidView(
-                            factory = {
-                                wv.also { view ->
-                                    // A tab switch can reuse this instance; detach
-                                    // it from the old Compose container first.
-                                    (view.parent as? ViewGroup)?.removeView(view)
-                                    view.setBackgroundColor(palette.background.toArgb())
-                                }
-                            },
-                            update = { it.setBackgroundColor(palette.background.toArgb()) },
-                            modifier = Modifier.fillMaxSize()
+                        AMzStartPage(
+                            userName = settings.userName,
+                            isPrivate = activeTab.isPrivate,
+                            stats = shieldStats,
+                            history = history,
+                            gyroEnabled = settings.gyroTilt,
+                            hazeState = hazeState,
+                            onOpenUrl = { navigate(it) },
+                            showTiltDebug = showTiltDebug,
+                            onToggleTiltDebug = { showTiltDebug = !showTiltDebug }
                         )
+                    } else {
+                        val wv = activeTab.webView
+                        if (wv == null) {
+                            // ensureWebView writes to the tab StateFlow, so it must
+                            // never be called from a remember initializer during
+                            // composition (that schedules another recomposition).
+                            LaunchedEffect(activeTab.id) {
+                                ensureActiveWebView()
+                            }
+                            Box(Modifier.fillMaxSize())
+                        } else {
+                            AndroidView(
+                                factory = {
+                                    wv.also { view ->
+                                        // A tab switch can reuse this instance; detach
+                                        // it from the old Compose container first.
+                                        (view.parent as? ViewGroup)?.removeView(view)
+                                        view.setBackgroundColor(palette.background.toArgb())
+                                    }
+                                },
+                                update = { it.setBackgroundColor(palette.background.toArgb()) },
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
                     }
                 }
+
+                // Solid edge fades drawn as siblings: never alpha/blur an
+                // ancestor of the WebView. They do not intercept touch input.
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .fillMaxWidth()
+                        .height(56.dp)
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(palette.background.copy(alpha = 0.92f), Color.Transparent)
+                            )
+                        )
+                )
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .height(120.dp)
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(Color.Transparent, palette.background.copy(alpha = 0.96f))
+                            )
+                        )
+                )
 
                 // Find in Page Bar
                 AnimatedVisibility(
@@ -496,6 +577,11 @@ fun AMzBrowserRoot(
                         .navigationBarsPadding()
                         .imePadding()
                         .padding(12.dp)
+                        .onGloballyPositioned { coordinates ->
+                            val height = coordinates.size.height
+                            if (panelHeightPx != height) panelHeightPx = height
+                        }
+                        .offset(y = panelShift)
                 )
 
                 // Tab Switcher Overlay
@@ -673,7 +759,9 @@ private fun AMzStartPage(
         modifier = Modifier
             .fillMaxSize()
             .statusBarsPadding(),
-        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 28.dp, bottom = 180.dp),
+        // The root wrapper already reserves the measured panel height; this is
+        // just breathing room above the bottom fade.
+        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 28.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(22.dp)
     ) {
         item(key = "greeting") {
