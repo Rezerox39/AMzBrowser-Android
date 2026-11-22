@@ -102,6 +102,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.aspectRatio
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.draw.clip
@@ -603,12 +604,19 @@ fun AMzBrowserRoot(
                         activeTabId = activeTab.id,
                         gyroEnabled = settings.gyroTilt,
                         hazeState = hazeState,
-                        onSelect = {
-                            tabManager.selectTab(it)
+                        onSelect = { id ->
+                            // Capture the page we are leaving before its WebView is
+                            // detached, otherwise the thumbnail goes stale/blank.
+                            if (id != activeTab.id) tabManager.captureThumbnail(activeTab.id)
+                            tabManager.selectTab(id)
                             showTabs = false
                         },
-                        onCloseTab = { tabManager.closeTab(it) },
+                        onCloseTab = { id ->
+                            if (id == activeTab.id) tabManager.captureThumbnail(id)
+                            tabManager.closeTab(id)
+                        },
                         onNewTab = {
+                            tabManager.captureThumbnail(activeTab.id)
                             tabManager.openNewTab(isPrivate = activeTab.isPrivate)
                             showTabs = false
                         },
@@ -1238,15 +1246,18 @@ private fun AMzTabSwitcherOverlay(
                         hazeState = hazeState,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(190.dp)
                             .clickable { onSelect(tab.id) }
                     ) {
-                        Column(modifier = Modifier.fillMaxSize()) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .weight(1f)
-                                    .background(palette.accent.copy(alpha = if (tab.id == activeTabId) 0.25f else 0.12f))
+                                    .aspectRatio(3f / 4f)
+                                    .background(
+                                        palette.accent.copy(
+                                            alpha = if (tab.id == activeTabId) 0.25f else 0.12f
+                                        )
+                                    )
                             ) {
                                 tab.thumbnail?.let { bmp ->
                                     Image(
@@ -1266,17 +1277,48 @@ private fun AMzTabSwitcherOverlay(
                                         .background(palette.card.copy(alpha = 0.85f))
                                         .clickable { onCloseTab(tab.id) }
                                 ) {
-                                    androidx.compose.material3.Icon(Icons.Rounded.Close, contentDescription = "Close", tint = palette.textPrimary, modifier = Modifier.size(16.dp))
+                                    androidx.compose.material3.Icon(
+                                        Icons.Rounded.Close,
+                                        contentDescription = "Close",
+                                        tint = palette.textPrimary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
                                 }
                             }
-                            Text(
-                                text = tab.title,
-                                color = palette.textPrimary,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.padding(10.dp)
-                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                val host = remember(tab.url) {
+                                    runCatching { URI(tab.url).host?.removePrefix("www.") }.getOrNull().orEmpty()
+                                }
+                                val icon = remember(host) { siteIconFor(host) }
+                                if (icon != null) {
+                                    Image(
+                                        painter = painterResource(icon),
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                } else {
+                                    androidx.compose.material3.Icon(
+                                        Icons.Rounded.Tab,
+                                        contentDescription = null,
+                                        tint = palette.accent,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    text = tab.title.ifBlank { host.ifBlank { "New Tab" } },
+                                    color = palette.textPrimary,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 13.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                         }
                     }
                 }
