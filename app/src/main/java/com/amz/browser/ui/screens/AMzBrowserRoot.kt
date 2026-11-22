@@ -25,6 +25,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -35,6 +37,8 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -484,9 +488,7 @@ fun AMzBrowserRoot(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .navigationBarsPadding()
-                        // windowSoftInputMode=adjustResize already shrinks the
-                        // window; adding imePadding() here double-counted the IME
-                        // height and made the whole viewport jump on keyboard open.
+                        .imePadding()
                         .padding(12.dp)
                 )
 
@@ -863,7 +865,12 @@ private fun AMzFloatingNavPanel(
                     .fillMaxWidth()
                     .padding(bottom = 8.dp)
             ) {
-                Column(modifier = Modifier.padding(6.dp)) {
+                Column(
+                    modifier = Modifier
+                        .padding(6.dp)
+                        .heightIn(max = 260.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
