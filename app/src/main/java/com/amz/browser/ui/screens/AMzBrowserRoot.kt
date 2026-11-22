@@ -1,11 +1,13 @@
 package com.amz.browser.ui.screens
 
+import com.amz.browser.R
 import android.content.Intent
 import android.net.Uri
 import android.webkit.ValueCallback
 import android.webkit.WebView
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -38,10 +40,17 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.awaitPointerEvent
+import androidx.compose.ui.input.pointer.awaitPointerEventScope
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.BlurOn
 import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.BookmarkBorder
 import androidx.compose.material.icons.rounded.Close
@@ -53,8 +62,11 @@ import androidx.compose.material.icons.rounded.MenuBook
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Sensors
 import androidx.compose.material.icons.rounded.Share
+import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Tab
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
@@ -65,6 +77,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -97,6 +110,7 @@ import com.amz.browser.data.SettingsRepo
 import com.amz.browser.data.ShieldStats
 import com.amz.browser.download.BrowserServices
 import com.amz.browser.download.NoOpDownloadEngine
+import com.amz.browser.download.SwiftDownloadEngine
 import com.amz.browser.search.OmniboxResolver
 import com.amz.browser.search.SearchEngine
 import com.amz.browser.search.SuggestionsClient
@@ -118,17 +132,22 @@ import kotlinx.coroutines.launch
 import java.net.URI
 import java.util.Calendar
 
-private data class FavoritePreset(val name: String, val glyph: String, val color: Long, val url: String)
+private data class FavoritePreset(
+    val name: String,
+    val iconRes: Int,
+    val color: Long,
+    val url: String
+)
 
 private val DefaultFavorites = listOf(
-    FavoritePreset("Apple", "A", 0xFF1D1D1FL, "https://www.apple.com"),
-    FavoritePreset("Wikipedia", "W", 0xFF636366L, "https://en.wikipedia.org"),
-    FavoritePreset("YouTube", "▶", 0xFFFF3B30L, "https://www.youtube.com"),
-    FavoritePreset("GitHub", "G", 0xFF5E5CE6L, "https://github.com"),
-    FavoritePreset("Maps", "⌖", 0xFF30D158L, "https://www.openstreetmap.org"),
-    FavoritePreset("News", "N", 0xFFFF9F0AL, "https://news.ycombinator.com"),
-    FavoritePreset("Music", "♪", 0xFFFF2D55L, "https://music.apple.com"),
-    FavoritePreset("Example", "E", 0xFF0A84FFL, "https://example.com")
+    FavoritePreset("Apple", R.drawable.ic_fav_apple, 0xFF1D1D1FL, "https://www.apple.com"),
+    FavoritePreset("Wikipedia", R.drawable.ic_fav_wikipedia, 0xFF8E8E93L, "https://en.wikipedia.org"),
+    FavoritePreset("YouTube", R.drawable.ic_fav_youtube, 0xFFFF3B30L, "https://www.youtube.com"),
+    FavoritePreset("GitHub", R.drawable.ic_fav_github, 0xFF2C2C30L, "https://github.com"),
+    FavoritePreset("Maps", R.drawable.ic_fav_maps, 0xFF30D158L, "https://www.openstreetmap.org"),
+    FavoritePreset("News", R.drawable.ic_fav_news, 0xFFFF9F0AL, "https://news.ycombinator.com"),
+    FavoritePreset("Music", R.drawable.ic_fav_music, 0xFFFF2D55L, "https://music.apple.com"),
+    FavoritePreset("Example", R.drawable.ic_fav_example, 0xFF0A84FFL, "https://example.com")
 )
 
 @Composable
@@ -170,7 +189,10 @@ fun AMzBrowserRoot(
     }
 
     LaunchedEffect(Unit) {
-        (BrowserServices.downloadEngine as? NoOpDownloadEngine)?.onToast = { showToast(it) }
+        when (val engine = BrowserServices.downloadEngine) {
+            is NoOpDownloadEngine -> engine.onToast = { showToast(it) }
+            is SwiftDownloadEngine -> engine.onToast = { showToast(it) }
+        }
     }
 
     LaunchedEffect(persistedTabs) {
@@ -201,7 +223,8 @@ fun AMzBrowserRoot(
             },
             onPageFinished = { _, url, title, blocked, isPriv ->
                 if (!isPriv) scope.launch { repo.recordHistory(title, url) }
-                if (settings.adShield && blocked > 0) showToast("Shield blocked $blocked")
+                // Shield counters are always visible in the Shield Report; avoid a
+                // toast on every page load / search.
             },
             onRequestFileChooser = onRequestFileChooser
         )
@@ -235,11 +258,21 @@ fun AMzBrowserRoot(
         ProvideTiltSensor(enabled = settings.gyroTilt) {
             val palette = LocalAMzPalette.current
             val hazeState = remember { HazeState() }
+            var fingerPosition by remember { mutableStateOf(Offset.Unspecified) }
 
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(palette.background)
+                    .pointerInput(Unit) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                val pressed = event.changes.filter { it.pressed }
+                                fingerPosition = pressed.firstOrNull()?.position ?: Offset.Unspecified
+                            }
+                        }
+                    }
             ) {
                 // Main viewport (Start Page or live WebView)
                 Box(
@@ -248,7 +281,7 @@ fun AMzBrowserRoot(
                         .hazeSource(hazeState)
                 ) {
                     if (activeTab.url.isBlank()) {
-                        AuroraBackground(fingerPosition = Offset.Unspecified)
+                        AuroraBackground(fingerPosition = fingerPosition)
                         AMzStartPage(
                             userName = settings.userName,
                             isPrivate = activeTab.isPrivate,
@@ -275,7 +308,8 @@ fun AMzBrowserRoot(
                                 },
                                 onPageFinished = { _, url, title, blocked, isPriv ->
                                     if (!isPriv) scope.launch { repo.recordHistory(title, url) }
-                                    if (settings.adShield && blocked > 0) showToast("Shield blocked $blocked")
+                                    // Shield counters are always visible in the Shield Report; avoid a
+                // toast on every page load / search.
                                 },
                                 onRequestFileChooser = onRequestFileChooser
                             )
@@ -329,15 +363,20 @@ fun AMzBrowserRoot(
                     }
                 }
 
-                // Redirect Blocked Snackbar
-                blockedRedirectUrl?.let { blocked ->
+                // Redirect Blocked Snackbar — anchored to the top so search never shifts it
+                AnimatedVisibility(
+                    visible = blockedRedirectUrl != null,
+                    enter = fadeIn() + slideInVertically { -it / 2 },
+                    exit = fadeOut() + slideOutVertically { -it / 2 },
+                    modifier = Modifier.align(Alignment.TopCenter)
+                ) {
+                    blockedRedirectUrl?.let { blocked ->
                     GlassSurface(
                         cornerRadius = 28.dp,
                         hazeState = hazeState,
                         modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .navigationBarsPadding()
-                            .padding(bottom = 132.dp, start = 16.dp, end = 16.dp)
+                            .statusBarsPadding()
+                            .padding(top = 12.dp, start = 16.dp, end = 16.dp)
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
@@ -353,6 +392,7 @@ fun AMzBrowserRoot(
                             }
                         }
                     }
+                }
                 }
 
                 // Floating Navigation Panel
@@ -574,6 +614,7 @@ private fun AMzStartPage(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         row.forEach { fav ->
+                            DelayedReveal(DefaultFavorites.indexOf(fav)) {
                             Column(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 modifier = Modifier
@@ -587,7 +628,11 @@ private fun AMzStartPage(
                                         .clip(RoundedCornerShape(16.dp))
                                         .background(Color(fav.color))
                                 ) {
-                                    Text(fav.glyph, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                                    Image(
+                                        painter = painterResource(fav.iconRes),
+                                        contentDescription = fav.name,
+                                        modifier = Modifier.size(30.dp)
+                                    )
                                 }
                                 Spacer(Modifier.height(6.dp))
                                 Text(
@@ -597,6 +642,7 @@ private fun AMzStartPage(
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
+                            }
                             }
                         }
                     }
@@ -652,6 +698,13 @@ private fun AMzStartPage(
                                         .padding(horizontal = 16.dp, vertical = 12.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
+                                    androidx.compose.material3.Icon(
+                                        Icons.Rounded.History,
+                                        contentDescription = null,
+                                        tint = palette.accent,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(Modifier.width(10.dp))
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(entry.title, color = palette.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                         Text(entry.url, style = MaterialTheme.typography.labelMedium, color = palette.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -688,17 +741,25 @@ private fun AMzFloatingNavPanel(
     val host = remember(currentUrl) { runCatching { URI(currentUrl).host?.removePrefix("www.") }.getOrNull().orEmpty() }
     val isHttps = currentUrl.startsWith("https://", true)
 
-    var query by remember(currentUrl) { mutableStateOf(host) }
+    var query by remember { mutableStateOf(host) }
     var editing by remember { mutableStateOf(false) }
     var suggestions by remember { mutableStateOf<List<String>>(emptyList()) }
+
+    // Keep the text stable while the user types; only follow the page URL when not editing.
+    LaunchedEffect(host) {
+        if (!editing) query = host
+    }
 
     LaunchedEffect(query, editing, searchEngine) {
         if (!editing || query.length < 2) {
             suggestions = emptyList()
             return@LaunchedEffect
         }
-        delay(150)
-        suggestions = SuggestionsClient.fetch(query, searchEngine)
+        val requested = query
+        delay(220)
+        if (!editing || query != requested) return@LaunchedEffect
+        val result = SuggestionsClient.fetch(requested, searchEngine)
+        if (editing && query == requested) suggestions = result
     }
 
     Column(modifier = modifier.fillMaxWidth()) {
@@ -957,6 +1018,43 @@ private fun AMzTabSwitcherOverlay(
 }
 
 @Composable
+private fun DelayedReveal(
+    index: Int,
+    content: @Composable () -> Unit
+) {
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(index * 45L)
+        visible = true
+    }
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(380)) + slideInVertically { it / 2 }
+    ) {
+        content()
+    }
+}
+
+@Composable
+private fun SettingSwitchRow(
+    label: String,
+    icon: ImageVector,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    val palette = LocalAMzPalette.current
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Icon(icon, contentDescription = null, tint = palette.accent, modifier = Modifier.size(20.dp))
+        Text(label, color = palette.textPrimary, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+@Composable
 private fun AMzQuickMenuSheet(
     settings: AppSettings,
     isBookmarked: Boolean,
@@ -1010,33 +1108,26 @@ private fun AMzQuickMenuSheet(
                     }
                 }
                 item {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text("Ad Shield", color = palette.textPrimary, fontWeight = FontWeight.Medium)
-                        Switch(checked = settings.adShield, onCheckedChange = { v -> onUpdateSettings { it[SettingsRepo.AD_SHIELD] = v } })
+                    SettingSwitchRow("Ad Shield", Icons.Rounded.Shield, settings.adShield) { v ->
+                        onUpdateSettings { it[SettingsRepo.AD_SHIELD] = v }
                     }
                 }
                 item {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text("HTTPS-Only", color = palette.textPrimary, fontWeight = FontWeight.Medium)
-                        Switch(checked = settings.httpsOnly, onCheckedChange = { v -> onUpdateSettings { it[SettingsRepo.HTTPS_ONLY] = v } })
+                    SettingSwitchRow("HTTPS-Only", Icons.Rounded.Lock, settings.httpsOnly) { v ->
+                        onUpdateSettings { it[SettingsRepo.HTTPS_ONLY] = v }
                     }
                 }
                 item {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text("Private Mode", color = palette.textPrimary, fontWeight = FontWeight.Medium)
-                        Switch(checked = isPrivate, onCheckedChange = { onTogglePrivate() })
+                    SettingSwitchRow("Private Mode", Icons.Rounded.VisibilityOff, isPrivate) { onTogglePrivate() }
+                }
+                item {
+                    SettingSwitchRow("Glass Blur", Icons.Rounded.BlurOn, settings.glassBlur) { v ->
+                        onUpdateSettings { it[SettingsRepo.GLASS_BLUR] = v }
                     }
                 }
                 item {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text("Glass Blur", color = palette.textPrimary, fontWeight = FontWeight.Medium)
-                        Switch(checked = settings.glassBlur, onCheckedChange = { v -> onUpdateSettings { it[SettingsRepo.GLASS_BLUR] = v } })
-                    }
-                }
-                item {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text("Gyro Tilt", color = palette.textPrimary, fontWeight = FontWeight.Medium)
-                        Switch(checked = settings.gyroTilt, onCheckedChange = { v -> onUpdateSettings { it[SettingsRepo.GYRO_TILT] = v } })
+                    SettingSwitchRow("Gyro Tilt", Icons.Rounded.Sensors, settings.gyroTilt) { v ->
+                        onUpdateSettings { it[SettingsRepo.GYRO_TILT] = v }
                     }
                 }
                 item {

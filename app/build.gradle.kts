@@ -65,4 +65,8 @@ dependencies {
 
     // Liquid Glass backdrop blur (gracefully falls back to tinted surface when Blur toggle is OFF)
     implementation("dev.chrisbanes.haze:haze:1.3.1")
+
+    // Segmented, resumable download engine ported from SwiftDM (MIT)
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 }

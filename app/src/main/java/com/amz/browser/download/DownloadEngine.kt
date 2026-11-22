@@ -22,13 +22,17 @@ import com.amz.browser.ui.theme.LocalAMzPalette
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
-enum class DownloadState { QUEUED, DOWNLOADING, COMPLETED, FAILED }
+enum class DownloadState { QUEUED, DOWNLOADING, PAUSED, COMPLETED, FAILED }
 
 data class DownloadItem(
     val id: String,
     val fileName: String,
     val progress: Float,
-    val state: DownloadState
+    val state: DownloadState,
+    val detail: String = "",
+    val canPause: Boolean = false,
+    val canResume: Boolean = false,
+    val canCancel: Boolean = false
 )
 
 interface DownloadEngine {

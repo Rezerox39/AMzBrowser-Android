@@ -5,6 +5,11 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.os.Handler
+import android.os.Looper
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Spring
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -47,41 +52,48 @@ fun ProvideTiltSensor(
         }
 
         val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
-        val sensor = sensorManager?.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR)
-            ?: sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        val rotationSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR)
+        val accelerometer = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        val sensor = rotationSensor ?: accelerometer
 
+        val mainHandler = Handler(Looper.getMainLooper())
         val rotationMatrix = FloatArray(9)
         val orientation = FloatArray(3)
         var filteredX = 0f
         var filteredY = 0f
-        val alpha = 0.14f
+        val alpha = 0.10f
 
         val listener = object : SensorEventListener {
             override fun onSensorChanged(event: SensorEvent) {
                 val rawX: Float
                 val rawY: Float
                 if (event.sensor.type == Sensor.TYPE_GAME_ROTATION_VECTOR) {
+                    if (event.values.size < 3) return
                     SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
                     SensorManager.getOrientation(rotationMatrix, orientation)
-                    rawX = (orientation[2] / (PI.toFloat() / 6f)).coerceIn(-1f, 1f)
-                    rawY = ((orientation[1] + 0.65f) / (PI.toFloat() / 6f)).coerceIn(-1f, 1f)
+                    rawX = (orientation[2] / (PI.toFloat() / 5f)).coerceIn(-1f, 1f)
+                    rawY = (orientation[1] / (PI.toFloat() / 5f)).coerceIn(-1f, 1f)
                 } else {
-                    rawX = (-event.values[0] / 5f).coerceIn(-1f, 1f)
-                    rawY = ((event.values[1] - 4.5f) / 5f).coerceIn(-1f, 1f)
+                    if (event.values.size < 3) return
+                    rawX = (-event.values[0] / 6f).coerceIn(-1f, 1f)
+                    rawY = (event.values[1] / 6f).coerceIn(-1f, 1f)
                 }
                 filteredX += alpha * (rawX - filteredX)
                 filteredY += alpha * (rawY - filteredY)
-                tilt = TiltState(filteredX, filteredY)
+                val next = TiltState(filteredX, filteredY)
+                mainHandler.post { tilt = next }
             }
 
             override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
         }
 
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME && sensor != null) {
-                sensorManager?.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_UI)
-            } else if (event == Lifecycle.Event.ON_PAUSE) {
-                sensorManager?.unregisterListener(listener)
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> if (sensor != null) {
+                    sensorManager?.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_UI)
+                }
+                Lifecycle.Event.ON_PAUSE -> sensorManager?.unregisterListener(listener)
+                else -> Unit
             }
         }
 
@@ -93,6 +105,7 @@ fun ProvideTiltSensor(
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
             sensorManager?.unregisterListener(listener)
+            mainHandler.removeCallbacksAndMessages(null)
         }
     }
 
@@ -103,12 +116,29 @@ fun ProvideTiltSensor(
 fun TiltCard(
     modifier: Modifier = Modifier,
     gyroEnabled: Boolean = true,
-    maxDegrees: Float = 7f,
+    maxDegrees: Float = 9f,
     content: @Composable BoxScope.(parallaxX: Float, parallaxY: Float) -> Unit
 ) {
     val sensorTilt = LocalTiltState.current
     var touchTilt by remember { mutableStateOf(TiltState()) }
     val activeTilt = if (gyroEnabled) sensorTilt else touchTilt
+
+    val rotationX by animateFloatAsState(
+        targetValue = -activeTilt.y * maxDegrees,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness = Spring.StiffnessLow
+        ),
+        label = "tiltX"
+    )
+    val rotationY by animateFloatAsState(
+        targetValue = activeTilt.x * maxDegrees,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness = Spring.StiffnessLow
+        ),
+        label = "tiltY"
+    )
 
     Box(
         modifier = modifier
@@ -126,9 +156,11 @@ fun TiltCard(
                 }
             }
             .graphicsLayer {
-                rotationY = activeTilt.x * maxDegrees
-                rotationX = -activeTilt.y * maxDegrees
-                cameraDistance = 12f * density
+                this.rotationX = rotationX
+                this.rotationY = rotationY
+                cameraDistance = 14f * density
+                translationX = activeTilt.x * 4f
+                translationY = activeTilt.y * 4f
             }
     ) {
         content(activeTilt.x, activeTilt.y)

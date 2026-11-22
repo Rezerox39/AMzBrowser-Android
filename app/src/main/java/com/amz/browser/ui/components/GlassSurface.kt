@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import com.amz.browser.ui.theme.LocalAMzPalette
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.HazeStyle
+import dev.chrisbanes.haze.HazeTint
 import dev.chrisbanes.haze.hazeEffect
 
 @Composable
@@ -36,10 +37,11 @@ fun GlassSurface(
         Modifier.hazeEffect(
             state = hazeState,
             style = HazeStyle(
-                backgroundColor = Color.Transparent,
-                tint = null,
-                blurRadius = 20.dp,
-                noiseFactor = 0.02f
+                backgroundColor = palette.card,
+                tint = HazeTint(palette.card.copy(alpha = 0.10f)),
+                fallbackTint = HazeTint(palette.card.copy(alpha = 0.65f)),
+                blurRadius = 16.dp,
+                noiseFactor = 0.015f
             )
         )
     } else {

@@ -9,6 +9,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.lifecycleScope
+import com.amz.browser.download.BrowserServices
+import com.amz.browser.download.SwiftDownloadEngine
 import com.amz.browser.shield.BlocklistManager
 import com.amz.browser.ui.screens.AMzBrowserRoot
 import kotlinx.coroutines.launch
@@ -29,6 +31,10 @@ class MainActivity : ComponentActivity() {
         installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        if (BrowserServices.downloadEngine !is SwiftDownloadEngine) {
+            BrowserServices.downloadEngine = SwiftDownloadEngine(applicationContext)
+        }
 
         val blocklist = BlocklistManager.getInstance(applicationContext)
         lifecycleScope.launch {

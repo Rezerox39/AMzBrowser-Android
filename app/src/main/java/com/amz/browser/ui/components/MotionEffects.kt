@@ -87,37 +87,73 @@ fun AuroraBackground(
         label = "drift"
     )
 
+    val rotation by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = driftDuration * 2, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "auroraRotation"
+    )
+    val breathe by transition.animateFloat(
+        initialValue = 0.88f,
+        targetValue = 1.12f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = (driftDuration * 0.65f).toInt(), easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "auroraBreathe"
+    )
+
     Canvas(modifier = modifier.fillMaxSize()) {
         val w = size.width
         val h = size.height
+        val t = phase * 2f - 1f
+        val rad = Math.toRadians(rotation.toDouble())
+        val cos = Math.cos(rad).toFloat()
+        val sin = Math.sin(rad).toFloat()
+
+        fun orbit(baseX: Float, baseY: Float, radius: Float): Offset {
+            val x = baseX + cos * radius * t
+            val y = baseY + sin * radius * t
+            return Offset(x * w, y * h)
+        }
 
         drawCircle(
             brush = Brush.radialGradient(
-                colors = listOf(Color(0xFF5E5CE6).copy(alpha = 0.30f), Color.Transparent),
-                center = Offset(w * (0.18f + phase * 0.15f), h * (0.12f + phase * 0.08f)),
-                radius = w * 0.62f
+                colors = listOf(Color(0xFF5E5CE6).copy(alpha = 0.34f), Color.Transparent),
+                center = orbit(0.18f, 0.14f, 0.10f),
+                radius = w * 0.66f * breathe
             )
         )
         drawCircle(
             brush = Brush.radialGradient(
-                colors = listOf(palette.accent.copy(alpha = 0.30f), Color.Transparent),
-                center = Offset(w * (0.85f - phase * 0.16f), h * (0.42f + phase * 0.12f)),
-                radius = w * 0.65f
+                colors = listOf(palette.accent.copy(alpha = 0.32f), Color.Transparent),
+                center = orbit(0.84f, 0.36f, 0.12f),
+                radius = w * 0.70f / breathe
             )
         )
         drawCircle(
             brush = Brush.radialGradient(
-                colors = listOf(Color(0xFFFF2D55).copy(alpha = 0.22f), Color.Transparent),
-                center = Offset(w * (0.25f + phase * 0.12f), h * (0.78f - phase * 0.10f)),
-                radius = w * 0.58f
+                colors = listOf(Color(0xFFFF2D55).copy(alpha = 0.24f), Color.Transparent),
+                center = orbit(0.28f, 0.82f, 0.11f),
+                radius = w * 0.60f * breathe
+            )
+        )
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(Color(0xFF30D158).copy(alpha = 0.16f), Color.Transparent),
+                center = orbit(0.72f, 0.74f, 0.14f),
+                radius = w * 0.50f / breathe
             )
         )
         if (fingerPosition != Offset.Unspecified) {
             drawCircle(
                 brush = Brush.radialGradient(
-                    colors = listOf(Color(0xFF64D2FF).copy(alpha = 0.24f), Color.Transparent),
+                    colors = listOf(Color(0xFF64D2FF).copy(alpha = 0.26f), Color.Transparent),
                     center = fingerPosition,
-                    radius = w * 0.45f
+                    radius = w * 0.45f * breathe
                 )
             )
         }
