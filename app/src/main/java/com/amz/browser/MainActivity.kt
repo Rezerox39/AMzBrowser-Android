@@ -25,6 +25,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        CrashReporter.install(applicationContext)
         installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
