@@ -42,8 +42,6 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
@@ -115,7 +113,6 @@ import com.amz.browser.search.SearchEngine
 import com.amz.browser.search.SuggestionsClient
 import com.amz.browser.shield.ShieldInjector
 import com.amz.browser.ui.components.AuroraBackground
-import com.amz.browser.ui.components.FingerTracker
 import com.amz.browser.ui.components.GlassSurface
 import com.amz.browser.ui.components.ProvideTiltSensor
 import com.amz.browser.ui.components.TiltCard
@@ -126,7 +123,6 @@ import com.amz.browser.ui.theme.AnimationSpeed
 import com.amz.browser.ui.theme.LocalAMzPalette
 import com.amz.browser.ui.theme.ThemeMode
 import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.net.URI
@@ -270,33 +266,17 @@ fun AMzBrowserRoot(
         ProvideTiltSensor(enabled = settings.gyroTilt) {
             val palette = LocalAMzPalette.current
             val hazeState = remember { HazeState() }
-            val fingerTracker = remember { FingerTracker() }
 
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(palette.background)
-                    .pointerInput(Unit) {
-                        awaitPointerEventScope {
-                            while (true) {
-                                val event = awaitPointerEvent(PointerEventPass.Initial)
-                                val pressed = event.changes.filter { it.pressed }
-                                fingerTracker.position = pressed.firstOrNull()?.position ?: Offset.Unspecified
-                            }
-                        }
-                    }
             ) {
-                // Aurora lives outside the haze source so its animation does not
-                // force all glass surfaces to re-blur every frame.
                 if (activeTab.url.isBlank()) {
-                    AuroraBackground(fingerTracker = fingerTracker)
+                    AuroraBackground()
                 }
                 // Main viewport (Start Page or live WebView)
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .hazeSource(hazeState)
-                ) {
+                Box(modifier = Modifier.fillMaxSize()) {
                     if (activeTab.url.isBlank()) {
                         AMzStartPage(
                             userName = settings.userName,
@@ -1311,7 +1291,7 @@ private fun AMzSetupOverlay(
             .fillMaxSize()
             .background(palette.background)
     ) {
-        AuroraBackground(fingerTracker = null)
+        AuroraBackground()
         TiltCard(gyroEnabled = settings.gyroTilt) {
             GlassSurface(
                 cornerRadius = 34.dp,

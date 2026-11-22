@@ -26,6 +26,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlin.math.PI
+import kotlin.math.abs
 
 /**
  * Stable holder for high-frequency tilt values. Values are read only inside draw /
@@ -68,6 +69,9 @@ fun ProvideTiltSensor(
         val orientation = FloatArray(3)
         var filteredX = 0f
         var filteredY = 0f
+        var lastSentX = 0f
+        var lastSentY = 0f
+        var lastPostTime = 0L
         val alpha = 0.10f
 
         val listener = object : SensorEventListener {
@@ -87,9 +91,15 @@ fun ProvideTiltSensor(
                 }
                 filteredX += alpha * (rawX - filteredX)
                 filteredY += alpha * (rawY - filteredY)
-                val nextX = filteredX
-                val nextY = filteredY
-                mainHandler.post { controller.update(nextX, nextY) }
+                val now = System.currentTimeMillis()
+                val changed = abs(filteredX - lastSentX) > 0.015f ||
+                    abs(filteredY - lastSentY) > 0.015f
+                if (now - lastPostTime >= 40L && changed) {
+                    lastPostTime = now
+                    lastSentX = filteredX
+                    lastSentY = filteredY
+                    mainHandler.post { controller.update(filteredX, filteredY) }
+                }
             }
 
             override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
@@ -98,7 +108,7 @@ fun ProvideTiltSensor(
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_RESUME -> if (sensor != null) {
-                    sensorManager?.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_UI)
+                    sensorManager?.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_NORMAL)
                 }
                 Lifecycle.Event.ON_PAUSE -> sensorManager?.unregisterListener(listener)
                 else -> Unit
@@ -106,9 +116,6 @@ fun ProvideTiltSensor(
         }
 
         lifecycleOwner.lifecycle.addObserver(observer)
-        if (sensor != null) {
-            sensorManager?.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_UI)
-        }
 
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
