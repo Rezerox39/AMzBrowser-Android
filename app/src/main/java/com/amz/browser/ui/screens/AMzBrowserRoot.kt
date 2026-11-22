@@ -17,6 +17,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -80,7 +81,10 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -89,6 +93,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -107,6 +112,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -445,7 +451,12 @@ fun AMzBrowserRoot(
                                         view.setBackgroundColor(palette.background.toArgb())
                                     }
                                 },
-                                update = { it.setBackgroundColor(palette.background.toArgb()) },
+                                update = { view ->
+                                    view.setBackgroundColor(palette.background.toArgb())
+                                    if (view.settings.textZoom != settings.textZoom) {
+                                        view.settings.textZoom = settings.textZoom
+                                    }
+                                },
                                 modifier = Modifier.fillMaxSize()
                             )
                         }
@@ -1326,7 +1337,98 @@ private fun SettingSwitchRow(
     ) {
         Icon(icon, contentDescription = null, tint = palette.accent, modifier = Modifier.size(20.dp))
         Text(label, color = palette.textPrimary, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = palette.accent,
+                uncheckedThumbColor = Color.White,
+                uncheckedTrackColor = palette.fill
+            )
+        )
+    }
+}
+
+@Composable
+private fun MenuSectionLabel(text: String) {
+    val palette = LocalAMzPalette.current
+    Text(
+        text,
+        color = palette.accent,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Bold,
+        modifier = Modifier.padding(top = 4.dp)
+    )
+}
+
+@Composable
+private fun <T> SettingChoiceRow(
+    label: String,
+    options: List<T>,
+    selected: T,
+    labelFor: (T) -> String,
+    onSelect: (T) -> Unit
+) {
+    val palette = LocalAMzPalette.current
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(label, color = palette.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(999.dp))
+                .background(palette.fill)
+                .padding(3.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            options.forEach { option ->
+                val active = option == selected
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(if (active) palette.accent else Color.Transparent)
+                        .clickable { onSelect(option) }
+                ) {
+                    Text(
+                        labelFor(option),
+                        color = if (active) Color.White else palette.textSecondary,
+                        fontSize = 13.sp,
+                        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingSliderRow(
+    label: String,
+    value: Int,
+    valueRange: ClosedFloatingPointRange<Float>,
+    steps: Int,
+    suffix: String,
+    onChange: (Int) -> Unit
+) {
+    val palette = LocalAMzPalette.current
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text("$label  $value$suffix", color = palette.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+        Slider(
+            value = value.toFloat(),
+            onValueChange = { onChange(it.toInt()) },
+            valueRange = valueRange,
+            steps = steps,
+            colors = SliderDefaults.colors(
+                thumbColor = Color.White,
+                activeTrackColor = palette.accent,
+                inactiveTrackColor = palette.fill
+            )
+        )
     }
 }
 
@@ -1349,9 +1451,11 @@ private fun AMzQuickMenuSheet(
     onClearData: () -> Unit
 ) {
     val palette = LocalAMzPalette.current
-    Box(
-        modifier = Modifier.fillMaxSize()
-    ) {
+    val density = LocalDensity.current
+    val maxSheetHeight = LocalConfiguration.current.screenHeightDp.dp * 0.85f
+    var dragY by remember { mutableFloatStateOf(0f) }
+
+    Box(modifier = Modifier.fillMaxSize()) {
         SheetScrim(onDismiss = onDismiss)
         GlassSurface(
             cornerRadius = 34.dp,
@@ -1361,67 +1465,171 @@ private fun AMzQuickMenuSheet(
                 .navigationBarsPadding()
                 .padding(8.dp)
                 .fillMaxWidth()
+                .heightIn(max = maxSheetHeight)
+                .offset(y = with(density) { dragY.toDp() })
                 .clickable(enabled = false) {}
         ) {
-            LazyColumn(
-                contentPadding = PaddingValues(18.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                item {
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-                        MenuTile(if (isBookmarked) "Saved" else "Bookmark", if (isBookmarked) Icons.Rounded.Bookmark else Icons.Rounded.BookmarkBorder, isBookmarked, Modifier.weight(1f), onToggleBookmark)
-                        MenuTile("Find", Icons.Rounded.Search, false, Modifier.weight(1f), onFind)
-                        MenuTile("Reader", Icons.Rounded.MenuBook, isReader, Modifier.weight(1f), onToggleReader)
-                    }
-                }
-                item {
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-                        MenuTile("Desktop", Icons.Rounded.Computer, isDesktop, Modifier.weight(1f), onToggleDesktop)
-                        MenuTile("Downloads", Icons.Rounded.Download, false, Modifier.weight(1f)) { onOpenLibrary(2) }
-                        MenuTile("History", Icons.Rounded.History, false, Modifier.weight(1f)) { onOpenLibrary(1) }
-                    }
-                }
-                item {
-                    SettingSwitchRow("Ad Shield", Icons.Rounded.Shield, settings.adShield) { v ->
-                        onUpdateSettings { it[SettingsRepo.AD_SHIELD] = v }
-                    }
-                }
-                item {
-                    SettingSwitchRow("HTTPS-Only", Icons.Rounded.Lock, settings.httpsOnly) { v ->
-                        onUpdateSettings { it[SettingsRepo.HTTPS_ONLY] = v }
-                    }
-                }
-                item {
-                    SettingSwitchRow("Private Mode", Icons.Rounded.VisibilityOff, isPrivate) { onTogglePrivate() }
-                }
-                item {
-                    SettingSwitchRow("Glass Blur", Icons.Rounded.BlurOn, settings.glassBlur) { v ->
-                        onUpdateSettings { it[SettingsRepo.GLASS_BLUR] = v }
-                    }
-                }
-                item {
-                    SettingSwitchRow("Gyro Tilt", Icons.Rounded.Sensors, settings.gyroTilt) { v ->
-                        onUpdateSettings { it[SettingsRepo.GYRO_TILT] = v }
-                    }
-                }
-                item {
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        AMzAccents.forEach { hex ->
-                            Box(
-                                modifier = Modifier
-                                    .size(34.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(hex))
-                                    .clickable { onUpdateSettings { it[SettingsRepo.ACCENT_HEX] = hex } }
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(30.dp)
+                        .pointerInput(Unit) {
+                            detectDragGestures(
+                                onDrag = { _, delta ->
+                                    val next = dragY + delta.y
+                                    // Rubber-band: resistance in both directions.
+                                    dragY = if (next > 0f) next * 0.72f else next * 0.28f
+                                },
+                                onDragEnd = {
+                                    if (dragY > 110f) onDismiss()
+                                    dragY = 0f
+                                },
+                                onDragCancel = { dragY = 0f }
                             )
+                        }
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(width = 44.dp, height = 4.dp)
+                            .clip(CircleShape)
+                            .background(palette.textSecondary.copy(alpha = 0.55f))
+                    )
+                }
+
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 4.dp, bottom = 56.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    item(key = "browsing") {
+                        MenuSectionLabel("Browsing")
+                    }
+                    item(key = "actions_one") {
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                            MenuTile(if (isBookmarked) "Saved" else "Bookmark", if (isBookmarked) Icons.Rounded.Bookmark else Icons.Rounded.BookmarkBorder, isBookmarked, Modifier.weight(1f), onToggleBookmark)
+                            MenuTile("Find", Icons.Rounded.Search, false, Modifier.weight(1f), onFind)
+                            MenuTile("Reader", Icons.Rounded.MenuBook, isReader, Modifier.weight(1f), onToggleReader)
+                        }
+                    }
+                    item(key = "actions_two") {
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                            MenuTile("Desktop", Icons.Rounded.Computer, isDesktop, Modifier.weight(1f), onToggleDesktop)
+                            MenuTile("Downloads", Icons.Rounded.Download, false, Modifier.weight(1f)) { onOpenLibrary(2) }
+                            MenuTile("History", Icons.Rounded.History, false, Modifier.weight(1f)) { onOpenLibrary(1) }
+                        }
+                    }
+                    item(key = "privacy") {
+                        MenuSectionLabel("Privacy")
+                    }
+                    item(key = "adshield") {
+                        SettingSwitchRow("Ad Shield", Icons.Rounded.Shield, settings.adShield) { v ->
+                            onUpdateSettings { it[SettingsRepo.AD_SHIELD] = v }
+                        }
+                    }
+                    item(key = "https") {
+                        SettingSwitchRow("HTTPS-Only", Icons.Rounded.Lock, settings.httpsOnly) { v ->
+                            onUpdateSettings { it[SettingsRepo.HTTPS_ONLY] = v }
+                        }
+                    }
+                    item(key = "private") {
+                        SettingSwitchRow("Private Mode", Icons.Rounded.VisibilityOff, isPrivate) { onTogglePrivate() }
+                    }
+                    item(key = "appearance") {
+                        MenuSectionLabel("Appearance")
+                    }
+                    item(key = "glass") {
+                        SettingSwitchRow("Glass Blur", Icons.Rounded.BlurOn, settings.glassBlur) { v ->
+                            onUpdateSettings { it[SettingsRepo.GLASS_BLUR] = v }
+                        }
+                    }
+                    item(key = "gyro") {
+                        SettingSwitchRow("Gyro Tilt", Icons.Rounded.Sensors, settings.gyroTilt) { v ->
+                            onUpdateSettings { it[SettingsRepo.GYRO_TILT] = v }
+                        }
+                    }
+                    item(key = "search_engine") {
+                        SettingChoiceRow(
+                            label = "Search Engine",
+                            options = SearchEngine.values().toList(),
+                            selected = settings.searchEngine,
+                            labelFor = { it.label }
+                        ) { engine ->
+                            onUpdateSettings { it[SettingsRepo.SEARCH_ENGINE] = engine.name }
+                        }
+                    }
+                    item(key = "text_size") {
+                        SettingSliderRow("Text Size", settings.textZoom, 75f..200f, 5, "%") { zoom ->
+                            onUpdateSettings { it[SettingsRepo.TEXT_ZOOM] = zoom }
+                        }
+                    }
+                    item(key = "theme") {
+                        SettingChoiceRow(
+                            label = "Theme",
+                            options = ThemeMode.values().toList(),
+                            selected = settings.themeMode,
+                            labelFor = { mode ->
+                                when (mode) {
+                                    ThemeMode.AUTO -> "Auto"
+                                    ThemeMode.LIGHT -> "Light"
+                                    ThemeMode.DARK -> "Dark"
+                                }
+                            }
+                        ) { mode ->
+                            onUpdateSettings { it[SettingsRepo.THEME_MODE] = mode.name }
+                        }
+                    }
+                    item(key = "anim_speed") {
+                        SettingChoiceRow(
+                            label = "Animation Speed",
+                            options = AnimationSpeed.values().toList(),
+                            selected = settings.animSpeed,
+                            labelFor = { speed ->
+                                when (speed) {
+                                    AnimationSpeed.CALM -> "Calm"
+                                    AnimationSpeed.FLUID -> "Fluid"
+                                    AnimationSpeed.SNAPPY -> "Snappy"
+                                }
+                            }
+                        ) { speed ->
+                            onUpdateSettings { it[SettingsRepo.ANIM_SPEED] = speed.name }
+                        }
+                    }
+                    item(key = "accent") {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Accent", color = palette.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                AMzAccents.forEach { hex ->
+                                    Box(
+                                        modifier = Modifier
+                                            .size(34.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(hex))
+                                            .clickable { onUpdateSettings { it[SettingsRepo.ACCENT_HEX] = hex } }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    item(key = "clear") {
+                        TextButton(onClick = onClearData) {
+                            Text("Clear Browsing Data", color = palette.destructive)
                         }
                     }
                 }
-                item {
-                    TextButton(onClick = onClearData) {
-                        Text("Clear Browsing Data", color = palette.destructive)
-                    }
-                }
+
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(Color.Transparent, palette.card.copy(alpha = 0.96f))
+                            )
+                        )
+                )
             }
         }
     }
