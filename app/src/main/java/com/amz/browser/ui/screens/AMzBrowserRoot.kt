@@ -1621,7 +1621,7 @@ private fun AMzQuickMenuSheet(
 
                 Box(
                     modifier = Modifier
-                        .align(Alignment.BottomCenter)
+                        .align(Alignment.CenterHorizontally)
                         .fillMaxWidth()
                         .height(48.dp)
                         .background(
