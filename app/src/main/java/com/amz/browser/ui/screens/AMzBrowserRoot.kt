@@ -440,9 +440,9 @@ fun AMzBrowserRoot(
                             val nextDesktop = !activeTab.desktopMode
                             tabManager.updateTab(activeTab.id) { it.copy(desktopMode = nextDesktop) }
                             activeTab.webView?.apply {
-                                settings.userAgentString = if (nextDesktop) WebViewFactory.DESKTOP_USER_AGENT else null
-                                settings.useWideViewPort = nextDesktop
-                                settings.loadWithOverviewMode = nextDesktop
+                                this.settings.userAgentString = if (nextDesktop) WebViewFactory.DESKTOP_USER_AGENT else null
+                                this.settings.useWideViewPort = nextDesktop
+                                this.settings.loadWithOverviewMode = nextDesktop
                                 reload()
                             }
                             showToast(if (nextDesktop) "Desktop site" else "Mobile site")
