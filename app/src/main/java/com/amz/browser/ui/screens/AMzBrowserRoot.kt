@@ -552,8 +552,7 @@ private fun AMzStartPage(
         item {
             Column {
                 Text(
-                    text = if (!isPrivate && userName.isNotBlank()) "$greeting,
-$userName" else greeting,
+                    text = if (!isPrivate && userName.isNotBlank()) "$greeting,\n$userName" else greeting,
                     style = MaterialTheme.typography.displayLarge,
                     color = palette.textPrimary
                 )
@@ -725,7 +724,7 @@ private fun AMzFloatingNavPanel(
                     ) {
                         androidx.compose.material3.Icon(Icons.Rounded.Search, contentDescription = null, tint = palette.accent, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(10.dp))
-                        Text("Search for "$query"", color = palette.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("Search for \"$query\"", color = palette.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     suggestions.forEach { term ->
                         Row(

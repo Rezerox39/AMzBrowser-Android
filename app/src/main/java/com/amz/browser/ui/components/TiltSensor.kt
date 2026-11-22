@@ -79,7 +79,7 @@ fun ProvideTiltSensor(
 
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME && sensor != null) {
-                sensorManager.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_UI)
+                sensorManager?.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_UI)
             } else if (event == Lifecycle.Event.ON_PAUSE) {
                 sensorManager?.unregisterListener(listener)
             }
@@ -87,7 +87,7 @@ fun ProvideTiltSensor(
 
         lifecycleOwner.lifecycle.addObserver(observer)
         if (sensor != null) {
-            sensorManager.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_UI)
+            sensorManager?.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_UI)
         }
 
         onDispose {

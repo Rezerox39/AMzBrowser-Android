@@ -78,8 +78,7 @@ class BlocklistManager private constructor(private val context: Context) {
             }
         }
         if (merged.size > 500) {
-            cachedHostsFile.writeText(merged.joinToString("
-"))
+            cachedHostsFile.writeText(merged.joinToString("\n"))
             metaFile.writeText(System.currentTimeMillis().toString())
             val combined = HashSet(blockedHosts)
             combined.addAll(merged)
@@ -90,7 +89,7 @@ class BlocklistManager private constructor(private val context: Context) {
     private fun parseHostLine(raw: String): String? {
         val trimmed = raw.substringBefore('#').trim().lowercase()
         if (trimmed.isEmpty()) return null
-        val parts = trimmed.split(Regex("\s+"))
+        val parts = trimmed.split(Regex("\\s+"))
         val host = when {
             parts.size >= 2 && (parts[0] == "0.0.0.0" || parts[0] == "127.0.0.1") -> parts[1]
             parts.size == 1 -> parts[0]
