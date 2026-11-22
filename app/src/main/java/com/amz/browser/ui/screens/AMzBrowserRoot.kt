@@ -1539,12 +1539,24 @@ private fun AMzSetupOverlay(
                 modifier = Modifier
                     .padding(horizontal = 24.dp)
                     .fillMaxWidth()
+                    .height(420.dp)
             ) {
-                Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(24.dp),
+                    verticalArrangement = Arrangement.SpaceBetween
+                ) {
                     when (step) {
                         0 -> {
-                            Text("Welcome to AMz Browser", style = MaterialTheme.typography.headlineSmall, color = palette.textPrimary,
-                                modifier = Modifier.tiltDebugLongPress { onToggleTiltDebug() }.then(tiltParallax(4.dp)))
+                            Text(
+                                "Welcome to AMz Browser",
+                                style = MaterialTheme.typography.headlineSmall,
+                                color = palette.textPrimary,
+                                modifier = Modifier
+                                    .tiltDebugLongPress { onToggleTiltDebug() }
+                                    .then(tiltParallax(4.dp))
+                            )
                             Text("What should we call you?", color = palette.textSecondary)
                             BasicTextField(
                                 value = name,
@@ -1561,15 +1573,62 @@ private fun AMzSetupOverlay(
                         }
                         1 -> {
                             Text("Appearance", style = MaterialTheme.typography.headlineSmall, color = palette.textPrimary)
+                            Text("Theme", color = palette.textSecondary, fontSize = 14.sp)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .background(palette.fill),
+                                horizontalArrangement = Arrangement.SpaceEvenly
+                            ) {
+                                ThemeMode.values().forEach { mode ->
+                                    val active = settings.themeMode == mode
+                                    val label = when (mode) {
+                                        ThemeMode.AUTO -> "Auto"
+                                        ThemeMode.LIGHT -> "Light"
+                                        ThemeMode.DARK -> "Dark"
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(999.dp))
+                                            .background(if (active) palette.accent else Color.Transparent)
+                                            .clickable {
+                                                onUpdateSettings { it[SettingsRepo.THEME_MODE] = mode.name }
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            label,
+                                            color = if (active) Color.White else palette.textSecondary,
+                                            fontSize = 14.sp,
+                                            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+                                            modifier = Modifier.padding(vertical = 10.dp)
+                                        )
+                                    }
+                                }
+                            }
+                            Text("Accent", color = palette.textSecondary, fontSize = 14.sp)
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 AMzAccents.forEach { hex ->
+                                    val active = settings.accentHex == hex
                                     Box(
                                         modifier = Modifier
                                             .size(38.dp)
                                             .clip(CircleShape)
                                             .background(Color(hex))
-                                            .clickable { onUpdateSettings { it[SettingsRepo.ACCENT_HEX] = hex } }
-                                    )
+                                            .clickable { onUpdateSettings { it[SettingsRepo.ACCENT_HEX] = hex } },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (active) {
+                                            androidx.compose.material3.Icon(
+                                                Icons.Rounded.Close,
+                                                contentDescription = null,
+                                                tint = Color.White,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1586,19 +1645,29 @@ private fun AMzSetupOverlay(
                         }
                     }
 
-                    Button(
-                        onClick = {
-                            if (step == 0) onUpdateSettings { it[SettingsRepo.USER_NAME] = name.trim() }
-                            if (step < 2) step++ else onFinish()
-                        },
-                        shape = CircleShape,
-                        colors = ButtonDefaults.buttonColors(containerColor = palette.accent),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(if (step == 2) "Start Browsing" else "Continue", modifier = Modifier.padding(vertical = 6.dp))
-                    }
-                    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        TextButton(onClick = onFinish) { Text("Skip", color = palette.textSecondary) }
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Button(
+                            onClick = {
+                                if (step == 0) onUpdateSettings { it[SettingsRepo.USER_NAME] = name.trim() }
+                                if (step < 2) step++ else onFinish()
+                            },
+                            shape = CircleShape,
+                            colors = ButtonDefaults.buttonColors(containerColor = palette.accent),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                if (step == 2) "Start Browsing" else "Continue",
+                                color = Color.White,
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(vertical = 6.dp)
+                            )
+                        }
+                        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            TextButton(onClick = onFinish) {
+                                Text("Skip", color = palette.textSecondary, fontSize = 14.sp)
+                            }
+                        }
                     }
                 }
             }
