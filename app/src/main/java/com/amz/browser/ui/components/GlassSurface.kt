@@ -36,6 +36,7 @@ fun GlassSurface(
         Modifier.hazeEffect(
             state = hazeState,
             style = HazeStyle(
+                backgroundColor = Color.Transparent,
                 tint = null,
                 blurRadius = 20.dp,
                 noiseFactor = 0.02f
