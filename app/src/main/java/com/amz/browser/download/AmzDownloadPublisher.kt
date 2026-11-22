@@ -140,10 +140,10 @@ class AmzDownloadPublisher(private val context: Context) : FilePublisher {
     }
 
     override suspend fun delete(published: PublishedFile): Boolean = withContext(Dispatchers.IO) {
-        if (published.uri.isNotBlank()) {
-            runCatching { context.contentResolver.delete(Uri.parse(published.uri), null, null) > 0 }
+        if (!published.uri.isNullOrBlank()) {
+            runCatching { context.contentResolver.delete(Uri.parse(published.uri!!), null, null) > 0 }
                 .getOrDefault(false)
-        } else if (published.path.isNotBlank()) {
+        } else if (!published.path.isNullOrBlank()) {
             File(published.path).delete()
         } else {
             false
@@ -151,7 +151,7 @@ class AmzDownloadPublisher(private val context: Context) : FilePublisher {
     }
 
     private companion object {
-        const val RELATIVE_PATH = "${Environment.DIRECTORY_DOWNLOADS}/AMz Browser/"
+        val RELATIVE_PATH = "${Environment.DIRECTORY_DOWNLOADS}/AMz Browser/"
         const val FALLBACK_FOLDER = "AMzBrowser"
         const val COPY_BUFFER = 128 * 1024
     }
