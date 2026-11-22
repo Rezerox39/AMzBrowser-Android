@@ -118,8 +118,12 @@ import com.amz.browser.shield.ShieldInjector
 import com.amz.browser.ui.components.AuroraBackground
 import com.amz.browser.ui.components.FingerTracker
 import com.amz.browser.ui.components.GlassSurface
+import com.amz.browser.ui.components.LocalTiltController
 import com.amz.browser.ui.components.ProvideTiltSensor
 import com.amz.browser.ui.components.TiltCard
+import com.amz.browser.ui.components.TiltDebugOverlay
+import com.amz.browser.ui.components.tiltDebugLongPress
+import com.amz.browser.ui.components.tiltParallax
 import com.amz.browser.ui.components.jellyClickable
 import com.amz.browser.ui.theme.AMzAccents
 import com.amz.browser.ui.theme.AMzTheme
@@ -193,6 +197,7 @@ fun AMzBrowserRoot(
 
     var toastMessage by remember { mutableStateOf<String?>(null) }
     var blockedRedirectUrl by remember { mutableStateOf<String?>(null) }
+    var showTiltDebug by remember { mutableStateOf(false) }
 
     fun showToast(msg: String) {
         toastMessage = msg
@@ -339,7 +344,9 @@ fun AMzBrowserRoot(
                             history = history,
                             gyroEnabled = settings.gyroTilt,
                             hazeState = hazeState,
-                            onOpenUrl = { navigate(it) }
+                            onOpenUrl = { navigate(it) },
+                            showTiltDebug = showTiltDebug,
+                            onToggleTiltDebug = { showTiltDebug = !showTiltDebug }
                         )
                     } else {
                         val wv = activeTab.webView
@@ -575,8 +582,22 @@ fun AMzBrowserRoot(
                         onUpdateSettings = { updater -> scope.launch { repo.update(updater) } },
                         onFinish = {
                             scope.launch { repo.update { it[SettingsRepo.SETUP_DONE] = true } }
-                        }
+                        },
+                        showTiltDebug = showTiltDebug,
+                        onToggleTiltDebug = { showTiltDebug = !showTiltDebug }
                     )
+                }
+
+                // Hidden tilt HUD: long-press the title for 3 s to toggle.
+                if (showTiltDebug) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .statusBarsPadding()
+                            .padding(12.dp)
+                    ) {
+                        TiltDebugOverlay(LocalTiltController.current)
+                    }
                 }
 
                 // Floating Glass Toast
@@ -612,7 +633,9 @@ private fun AMzStartPage(
     history: List<com.amz.browser.data.HistoryEntry>,
     gyroEnabled: Boolean,
     hazeState: HazeState,
-    onOpenUrl: (String) -> Unit
+    onOpenUrl: (String) -> Unit,
+    showTiltDebug: Boolean,
+    onToggleTiltDebug: () -> Unit
 ) {
     val palette = LocalAMzPalette.current
     val hour = remember { Calendar.getInstance().get(Calendar.HOUR_OF_DAY) }
@@ -635,13 +658,17 @@ private fun AMzStartPage(
                 Text(
                     text = if (!isPrivate && userName.isNotBlank()) "$greeting,\n$userName" else greeting,
                     style = MaterialTheme.typography.displayLarge,
-                    color = palette.textPrimary
+                    color = palette.textPrimary,
+                    modifier = Modifier
+                        .tiltDebugLongPress { onToggleTiltDebug() }
+                        .then(tiltParallax(4.dp))
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
                     text = if (isPrivate) "History is not saved in private tabs." else "Where to next?",
                     style = MaterialTheme.typography.bodyLarge,
-                    color = palette.textSecondary
+                    color = palette.textSecondary,
+                    modifier = tiltParallax(8.dp)
                 )
             }
         }
@@ -1328,7 +1355,9 @@ private fun AMzSetupOverlay(
     settings: AppSettings,
     hazeState: HazeState,
     onUpdateSettings: ((androidx.datastore.preferences.core.MutablePreferences) -> Unit) -> Unit,
-    onFinish: () -> Unit
+    onFinish: () -> Unit,
+    showTiltDebug: Boolean = false,
+    onToggleTiltDebug: () -> Unit = {}
 ) {
     val palette = LocalAMzPalette.current
     var step by remember { mutableIntStateOf(0) }
@@ -1352,7 +1381,8 @@ private fun AMzSetupOverlay(
                 Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     when (step) {
                         0 -> {
-                            Text("Welcome to AMz Browser", style = MaterialTheme.typography.headlineSmall, color = palette.textPrimary)
+                            Text("Welcome to AMz Browser", style = MaterialTheme.typography.headlineSmall, color = palette.textPrimary,
+                                modifier = Modifier.tiltDebugLongPress { onToggleTiltDebug() }.then(tiltParallax(4.dp)))
                             Text("What should we call you?", color = palette.textSecondary)
                             BasicTextField(
                                 value = name,

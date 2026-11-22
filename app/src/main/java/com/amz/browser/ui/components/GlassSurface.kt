@@ -72,9 +72,11 @@ fun GlassSurface(
             .border(width = 1.dp, brush = rimBrush, shape = shape)
             .drawWithContent {
                 drawContent()
+                val nx = (tiltController.x.value / 8f).coerceIn(-1f, 1f)
+                val ny = (tiltController.y.value / 8f).coerceIn(-1f, 1f)
                 val sheenCenter = Offset(
-                    x = size.width * (0.5f + tiltController.x * 0.42f),
-                    y = size.height * (0.25f + tiltController.y * 0.42f)
+                    x = size.width * (0.5f + nx * 0.42f),
+                    y = size.height * (0.25f + ny * 0.42f)
                 )
                 drawRect(
                     brush = Brush.radialGradient(
