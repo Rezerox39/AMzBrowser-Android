@@ -28,6 +28,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
@@ -66,7 +67,7 @@ private val TiltSpring: SpringSpec<Float> = spring(dampingRatio = 0.8f, stiffnes
  * Compose State is written from the sensor callback, and consumers read [x]/[y]
  * exclusively inside draw/layout-phase lambdas, so tilting never recomposes the UI.
  */
-class TiltController {
+class TiltController(animationScope: CoroutineScope? = null) {
     val x = Animatable(0f)
     val y = Animatable(0f)
 
@@ -83,7 +84,15 @@ class TiltController {
     @Volatile
     var sensorAvailable = false
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    // Animatable needs a MonotonicFrameClock. A composable scope carries the
+    // Compose frame clock; the standalone fallback exists only for the static
+    // CompositionLocal default, which never receives sensor updates.
+    private val job = SupervisorJob()
+    private val scope = if (animationScope != null) {
+        CoroutineScope(animationScope.coroutineContext + job)
+    } else {
+        CoroutineScope(Dispatchers.Main.immediate + job)
+    }
     private val targets = MutableSharedFlow<Pair<Float, Float>>(replay = 1, extraBufferCapacity = 1)
 
     init {
@@ -117,7 +126,8 @@ fun ProvideTiltSensor(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val controller = remember { TiltController() }
+    val animationScope = rememberCoroutineScope()
+    val controller = remember(animationScope) { TiltController(animationScope) }
 
     DisposableEffect(Unit) {
         onDispose { controller.close() }
