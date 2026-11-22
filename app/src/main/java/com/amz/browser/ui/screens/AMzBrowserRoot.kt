@@ -44,6 +44,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -101,7 +104,10 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -808,6 +814,10 @@ private fun AMzStartPage(
     }
 }
 
+/** Idle / Editing / Loaded drive every visible part of the omnibox. */
+@Immutable
+private enum class OmniboxState { Idle, Editing, Loaded }
+
 @Composable
 private fun AMzFloatingNavPanel(
     currentUrl: String,
@@ -827,37 +837,72 @@ private fun AMzFloatingNavPanel(
     modifier: Modifier = Modifier
 ) {
     val palette = LocalAMzPalette.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focusRequester = remember { FocusRequester() }
     val host = remember(currentUrl) { runCatching { URI(currentUrl).host?.removePrefix("www.") }.getOrNull().orEmpty() }
     val isHttps = currentUrl.startsWith("https://", true)
     val siteIcon = remember(host) { siteIconFor(host) }
+    val isLoading = progress in 1..99
 
-    var query by remember { mutableStateOf(host) }
-    var editing by remember { mutableStateOf(false) }
+    var focused by remember { mutableStateOf(false) }
+    var state by remember { mutableStateOf(OmniboxState.Idle) }
+    var fieldValue by remember { mutableStateOf(TextFieldValue(host)) }
+    var submittedText by remember { mutableStateOf<String?>(null) }
     var suggestions by remember { mutableStateOf<List<String>>(emptyList()) }
 
-    // Keep the text stable while the user types; only follow the page URL when not editing.
-    // rememberUpdatedState is essential here: a plain capture would stay false
-    // forever, so a URL update during typing would overwrite the query mid-keystroke
-    // and make the omnibox visibly jump/flicker.
-    val currentEditing by rememberUpdatedState(editing)
-    LaunchedEffect(host) {
-        if (!currentEditing) query = host
+    // The only text the user sees: typed text while editing/loading, otherwise
+    // the host name derived from the WebView URL callbacks.
+    val displayText by remember(host, currentUrl, fieldValue.text, submittedText, state, isLoading) {
+        derivedStateOf {
+            when {
+                state == OmniboxState.Editing -> fieldValue.text
+                submittedText != null -> submittedText!!
+                else -> host.ifBlank { currentUrl }
+            }
+        }
     }
 
-    LaunchedEffect(query, editing, searchEngine) {
-        if (!editing || query.length < 2) {
+    LaunchedEffect(displayText) {
+        if (state != OmniboxState.Editing && fieldValue.text != displayText) {
+            fieldValue = TextFieldValue(displayText)
+        }
+    }
+    LaunchedEffect(progress, currentUrl) {
+        if (progress >= 100 && currentUrl.isNotBlank()) submittedText = null
+    }
+
+    fun stopEditing() {
+        state = OmniboxState.Idle
+        suggestions = emptyList()
+        keyboard?.hide()
+        focusRequester.freeFocus()
+    }
+
+    fun submit(text: String) {
+        val input = text.trim()
+        if (input.isBlank()) return
+        submittedText = input
+        stopEditing()
+        onSubmit(input)
+    }
+
+    LaunchedEffect(fieldValue.text, state, focused, searchEngine) {
+        val requested = fieldValue.text
+        // The card is bound to focus, never to text alone.
+        if (state != OmniboxState.Editing || !focused || requested.length < 2) {
             suggestions = emptyList()
             return@LaunchedEffect
         }
-        val requested = query
         delay(220)
-        if (!editing || query != requested) return@LaunchedEffect
+        if (state != OmniboxState.Editing || !focused || fieldValue.text != requested) return@LaunchedEffect
         val result = SuggestionsClient.fetch(requested, searchEngine)
-        if (editing && query == requested) suggestions = result
+        if (state == OmniboxState.Editing && focused && fieldValue.text == requested) {
+            suggestions = result
+        }
     }
 
     Column(modifier = modifier.fillMaxWidth()) {
-        if (editing && query.isNotBlank()) {
+        if (state == OmniboxState.Editing && focused && fieldValue.text.isNotBlank()) {
             GlassSurface(
                 cornerRadius = 22.dp,
                 hazeState = hazeState,
@@ -875,27 +920,20 @@ private fun AMzFloatingNavPanel(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(14.dp))
-                            .clickable {
-                                editing = false
-                                onSubmit(query)
-                            }
+                            .clickable { submit(fieldValue.text) }
                             .padding(horizontal = 12.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         androidx.compose.material3.Icon(Icons.Rounded.Search, contentDescription = null, tint = palette.accent, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(10.dp))
-                        Text("Search for \"$query\"", color = palette.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("Search for \"${fieldValue.text}\"", color = palette.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     suggestions.forEach { term ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(14.dp))
-                                .clickable {
-                                    query = term
-                                    editing = false
-                                    onSubmit(term)
-                                }
+                                .clickable { submit(term) }
                                 .padding(horizontal = 12.dp, vertical = 9.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -918,7 +956,7 @@ private fun AMzFloatingNavPanel(
                     contentAlignment = Alignment.CenterStart
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                        if (!editing && siteIcon != null) {
+                        if (state != OmniboxState.Editing && siteIcon != null) {
                             Image(
                                 painter = painterResource(siteIcon),
                                 contentDescription = null,
@@ -926,36 +964,52 @@ private fun AMzFloatingNavPanel(
                             )
                         } else {
                             androidx.compose.material3.Icon(
-                                imageVector = if (isHttps && !editing) Icons.Rounded.Lock else Icons.Rounded.Search,
+                                imageVector = if (isHttps && state != OmniboxState.Editing) Icons.Rounded.Lock else Icons.Rounded.Search,
                                 contentDescription = null,
-                                tint = if (isHttps && !editing) palette.success else palette.textSecondary,
+                                tint = if (isHttps && state != OmniboxState.Editing) palette.success else palette.textSecondary,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
                         Spacer(Modifier.width(8.dp))
                         BasicTextField(
-                            value = query,
+                            value = if (state == OmniboxState.Editing) fieldValue else TextFieldValue(displayText),
                             onValueChange = {
-                                query = it
-                                editing = true
+                                fieldValue = it
+                                state = OmniboxState.Editing
                             },
                             singleLine = true,
                             textStyle = TextStyle(color = palette.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.Medium),
                             cursorBrush = SolidColor(palette.accent),
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
-                            keyboardActions = KeyboardActions(onGo = {
-                                editing = false
-                                onSubmit(query)
-                            }),
-                            modifier = Modifier.weight(1f),
+                            keyboardActions = KeyboardActions(onGo = { submit(fieldValue.text) }),
+                            modifier = Modifier
+                                .weight(1f)
+                                .focusRequester(focusRequester)
+                                .onFocusChanged { focus ->
+                                    focused = focus.isFocused
+                                    if (focus.isFocused && state != OmniboxState.Editing) {
+                                        state = OmniboxState.Editing
+                                        fieldValue = fieldValue.copy(
+                                            selection = TextRange(0, fieldValue.text.length)
+                                        )
+                                    } else if (!focus.isFocused && state == OmniboxState.Editing) {
+                                        state = OmniboxState.Idle
+                                        suggestions = emptyList()
+                                    }
+                                },
                             decorationBox = { inner ->
-                                if (query.isEmpty()) {
+                                if (displayText.isEmpty()) {
                                     Text("Search or enter website", color = palette.textSecondary, fontSize = 16.sp)
                                 }
                                 inner()
                             }
                         )
-                        if (currentUrl.isNotBlank()) {
+                        if (state == OmniboxState.Editing) {
+                            TextButton(onClick = { stopEditing() }) {
+                                Text("Cancel", color = palette.accent, fontSize = 13.sp)
+                            }
+                        }
+                        if (!isLoading && state != OmniboxState.Editing && currentUrl.isNotBlank()) {
                             Box(
                                 contentAlignment = Alignment.Center,
                                 modifier = Modifier
@@ -967,7 +1021,7 @@ private fun AMzFloatingNavPanel(
                         }
                     }
 
-                    if (progress in 1..99) {
+                    if (isLoading) {
                         LinearProgressIndicator(
                             progress = { progress / 100f },
                             color = palette.accent,

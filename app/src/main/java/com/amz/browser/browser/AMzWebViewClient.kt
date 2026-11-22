@@ -16,7 +16,8 @@ class AMzWebViewClient(
     private val onAdBlocked: () -> Unit,
     private val onRedirectBlocked: (String) -> Unit,
     private val onPageStartedCallback: (String) -> Unit,
-    private val onPageFinishedCallback: (String, String, Int) -> Unit
+    private val onPageFinishedCallback: (String, String, Int) -> Unit,
+    private val onVisitedHistoryCallback: (String) -> Unit = {}
 ) : WebViewClient() {
 
     private var currentMainHost: String? = null
@@ -78,5 +79,12 @@ class AMzWebViewClient(
         if (url != null) {
             onPageFinishedCallback(url, view?.title.orEmpty().ifBlank { url }, pageBlockedCount)
         }
+    }
+
+    override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
+        super.doUpdateVisitedHistory(view, url, isReload)
+        // Covers same-document URL changes (hash/history.pushState) that never
+        // fire onPageStarted, so the omnibox host label stays accurate.
+        if (!url.isNullOrBlank()) onVisitedHistoryCallback(url)
     }
 }

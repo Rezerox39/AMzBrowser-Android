@@ -81,6 +81,11 @@ class TabManagerViewModel : ViewModel() {
             onPageStartedCallback = { url ->
                 updateTab(tabId) { it.copy(url = url, progress = 15) }
             },
+            onVisitedHistoryCallback = { url ->
+                updateTab(tabId) { current ->
+                    if (current.url == url) current else current.copy(url = url)
+                }
+            },
             onPageFinishedCallback = { url, title, blocked ->
                 val wv = _tabs.value.find { it.id == tabId }?.webView
                 updateTab(tabId) {
