@@ -8,21 +8,19 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.amz.browser.ui.theme.LocalAMzPalette
 import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.HazeStyle
+import dev.chrisbanes.haze.HazeTint
+import dev.chrisbanes.haze.hazeEffect
 
-/**
- * Lightweight glass-styled surface.
- *
- * Backdrop blur was removed: re-blurring a live WebView on every frame was the
- * main cause of jank. The layered gradient + rim + shadow keeps the glass look
- * without the per-frame GPU cost. [hazeState] is kept for call-site compatibility.
- */
 @Composable
 fun GlassSurface(
     modifier: Modifier = Modifier,
@@ -32,11 +30,30 @@ fun GlassSurface(
     content: @Composable BoxScope.() -> Unit
 ) {
     val palette = LocalAMzPalette.current
+    val tiltController = LocalTiltController.current
     val shape = RoundedCornerShape(cornerRadius)
 
-    val backgroundBrush = Brush.linearGradient(
-        colors = listOf(palette.glassTop, palette.glassBottom)
-    )
+    val blurModifier = if (palette.glassBlurEnabled && hazeState != null) {
+        Modifier.hazeEffect(
+            state = hazeState,
+            style = HazeStyle(
+                backgroundColor = palette.card,
+                tint = HazeTint(palette.card.copy(alpha = 0.10f)),
+                fallbackTint = HazeTint(palette.card.copy(alpha = 0.65f)),
+                blurRadius = 10.dp,
+                noiseFactor = 0.01f
+            )
+        )
+    } else {
+        Modifier
+    }
+
+    val backgroundBrush = if (palette.glassBlurEnabled) {
+        Brush.linearGradient(colors = listOf(palette.glassTop, palette.glassBottom))
+    } else {
+        Brush.linearGradient(colors = listOf(palette.card, palette.card))
+    }
+
     val rimBrush = Brush.linearGradient(
         colors = listOf(palette.rimTop, palette.rimBottom)
     )
@@ -50,8 +67,26 @@ fun GlassSurface(
                 spotColor = Color.Black.copy(alpha = if (palette.isDark) 0.55f else 0.18f)
             )
             .clip(shape)
+            .then(blurModifier)
             .background(backgroundBrush)
-            .border(width = 1.dp, brush = rimBrush, shape = shape),
+            .border(width = 1.dp, brush = rimBrush, shape = shape)
+            .drawWithContent {
+                drawContent()
+                val sheenCenter = Offset(
+                    x = size.width * (0.5f + tiltController.x * 0.42f),
+                    y = size.height * (0.25f + tiltController.y * 0.42f)
+                )
+                drawRect(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = if (palette.isDark) 0.14f else 0.28f),
+                            Color.Transparent
+                        ),
+                        center = sheenCenter,
+                        radius = size.maxDimension * 0.8f
+                    )
+                )
+            },
         content = content
     )
 }

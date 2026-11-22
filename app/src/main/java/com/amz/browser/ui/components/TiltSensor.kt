@@ -26,7 +26,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlin.math.PI
-import kotlin.math.abs
 
 /**
  * Stable holder for high-frequency tilt values. Values are read only inside draw /
@@ -92,9 +91,9 @@ fun ProvideTiltSensor(
                 filteredX += alpha * (rawX - filteredX)
                 filteredY += alpha * (rawY - filteredY)
                 val now = System.currentTimeMillis()
-                val changed = abs(filteredX - lastSentX) > 0.015f ||
-                    abs(filteredY - lastSentY) > 0.015f
-                if (now - lastPostTime >= 40L && changed) {
+                val changed = kotlin.math.abs(filteredX - lastSentX) > 0.012f ||
+                    kotlin.math.abs(filteredY - lastSentY) > 0.012f
+                if (now - lastPostTime >= 32L && changed) {
                     lastPostTime = now
                     lastSentX = filteredX
                     lastSentY = filteredY
@@ -108,7 +107,7 @@ fun ProvideTiltSensor(
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_RESUME -> if (sensor != null) {
-                    sensorManager?.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_NORMAL)
+                    sensorManager?.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_UI)
                 }
                 Lifecycle.Event.ON_PAUSE -> sensorManager?.unregisterListener(listener)
                 else -> Unit
@@ -116,6 +115,8 @@ fun ProvideTiltSensor(
         }
 
         lifecycleOwner.lifecycle.addObserver(observer)
+        // Do not register here as well: the ON_RESUME observer already does it,
+        // and registering twice delivers every sensor event twice.
 
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)

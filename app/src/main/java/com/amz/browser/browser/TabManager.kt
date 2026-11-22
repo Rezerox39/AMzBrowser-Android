@@ -38,9 +38,15 @@ class TabManagerViewModel : ViewModel() {
     private val _activeTabId = MutableStateFlow(_tabs.value.first().id)
     val activeTabId: StateFlow<String> = _activeTabId.asStateFlow()
 
+    // Restoration must happen at most once. Without this guard, writing the
+    // restored tabs triggers saveTabs -> DataStore re-emission -> restore again,
+    // which produces an unbounded full-page recomposition loop.
+    private var restoredOnce = false
+
     fun restoreTabsIfFresh(saved: List<PersistedTab>) {
-        if (saved.isEmpty()) return
+        if (restoredOnce || saved.isEmpty()) return
         if (_tabs.value.size == 1 && _tabs.value.first().url.isEmpty() && _tabs.value.first().webView == null) {
+            restoredOnce = true
             val restored = saved.map { BrowserTab(id = it.id, title = it.title, url = it.url) }
             _tabs.value = restored
             _activeTabId.value = restored.last().id

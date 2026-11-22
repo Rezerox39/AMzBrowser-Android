@@ -24,7 +24,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -42,6 +41,8 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
@@ -80,6 +81,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -103,6 +105,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.amz.browser.browser.TabManagerViewModel
 import com.amz.browser.browser.WebViewFactory
 import com.amz.browser.data.AppSettings
+import com.amz.browser.data.PersistedTab
 import com.amz.browser.data.SettingsRepo
 import com.amz.browser.data.ShieldStats
 import com.amz.browser.download.BrowserServices
@@ -113,6 +116,7 @@ import com.amz.browser.search.SearchEngine
 import com.amz.browser.search.SuggestionsClient
 import com.amz.browser.shield.ShieldInjector
 import com.amz.browser.ui.components.AuroraBackground
+import com.amz.browser.ui.components.FingerTracker
 import com.amz.browser.ui.components.GlassSurface
 import com.amz.browser.ui.components.ProvideTiltSensor
 import com.amz.browser.ui.components.TiltCard
@@ -123,10 +127,12 @@ import com.amz.browser.ui.theme.AnimationSpeed
 import com.amz.browser.ui.theme.LocalAMzPalette
 import com.amz.browser.ui.theme.ThemeMode
 import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.net.URI
 import java.util.Calendar
+import java.util.concurrent.atomic.AtomicIntegerArray
 
 private data class FavoritePreset(
     val name: String,
@@ -203,39 +209,71 @@ fun AMzBrowserRoot(
         }
     }
 
+    var lastPersistedTabs by remember { mutableStateOf<List<PersistedTab>?>(null) }
+
     LaunchedEffect(persistedTabs) {
         tabManager.restoreTabsIfFresh(persistedTabs)
     }
 
+    // Tab state changes on every progress tick and page event. Debounce the
+    // write and skip identical snapshots so DataStore does not re-emit (and
+    // recompose the entire tree) dozens of times during a single load.
     LaunchedEffect(tabs) {
-        repo.saveTabs(tabManager.toPersistedTabs())
+        delay(650)
+        val snapshot = tabManager.toPersistedTabs()
+        if (snapshot == lastPersistedTabs) return@LaunchedEffect
+        lastPersistedTabs = snapshot
+        repo.saveTabs(snapshot)
     }
+
+    // A search results page can block hundreds of ad/tracker requests. Writing
+    // one DataStore transaction per request caused a recomposition storm that
+    // looked like flicker. Batch the counters and flush periodically instead.
+    val pendingShield = remember { AtomicIntegerArray(3) }
+    fun queueShield(ads: Int = 0, popups: Int = 0, redirects: Int = 0) {
+        pendingShield.addAndGet(0, ads)
+        pendingShield.addAndGet(1, popups)
+        pendingShield.addAndGet(2, redirects)
+    }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1200)
+            val ads = pendingShield.getAndSet(0, 0)
+            val popups = pendingShield.getAndSet(1, 0)
+            val redirects = pendingShield.getAndSet(2, 0)
+            if (ads + popups + redirects > 0) {
+                repo.incrementShieldCounters(ads, popups, redirects)
+            }
+        }
+    }
+
+    fun ensureActiveWebView(): WebView = tabManager.ensureWebView(
+        tabId = activeTab.id,
+        context = context,
+        isDarkTheme = settings.themeMode == ThemeMode.DARK,
+        textZoom = settings.textZoom,
+        isAdShieldEnabled = { settings.adShield },
+        isHttpsOnlyEnabled = { settings.httpsOnly },
+        onAdBlocked = { queueShield(ads = 1) },
+        onPopupBlocked = { queueShield(popups = 1) },
+        onRedirectBlocked = { target ->
+            blockedRedirectUrl = target
+            queueShield(redirects = 1)
+        },
+        onPageFinished = { _, url, title, _, isPriv ->
+            if (!isPriv) scope.launch { repo.recordHistory(title, url) }
+        },
+        onRequestFileChooser = onRequestFileChooser
+    )
 
     fun navigate(rawInput: String) {
         val (resolvedUrl, _) = OmniboxResolver.resolve(rawInput, settings.searchEngine, settings.httpsOnly)
         if (resolvedUrl.isBlank()) return
         blockedRedirectUrl = null
+        // Create the WebView before changing the URL so the composition never
+        // observes a URL-bearing tab with no WebView attached.
+        val wv = ensureActiveWebView()
         tabManager.updateTab(activeTab.id) { it.copy(url = resolvedUrl) }
-        val wv = tabManager.ensureWebView(
-            tabId = activeTab.id,
-            context = context,
-            isDarkTheme = settings.themeMode == ThemeMode.DARK,
-            textZoom = settings.textZoom,
-            isAdShieldEnabled = { settings.adShield },
-            isHttpsOnlyEnabled = { settings.httpsOnly },
-            onAdBlocked = { scope.launch { repo.incrementShieldCounters(ads = 1) } },
-            onPopupBlocked = { scope.launch { repo.incrementShieldCounters(popups = 1) } },
-            onRedirectBlocked = { target ->
-                blockedRedirectUrl = target
-                scope.launch { repo.incrementShieldCounters(redirects = 1) }
-            },
-            onPageFinished = { _, url, title, blocked, isPriv ->
-                if (!isPriv) scope.launch { repo.recordHistory(title, url) }
-                // Shield counters are always visible in the Shield Report; avoid a
-                // toast on every page load / search.
-            },
-            onRequestFileChooser = onRequestFileChooser
-        )
         wv.loadUrl(resolvedUrl)
     }
 
@@ -266,17 +304,33 @@ fun AMzBrowserRoot(
         ProvideTiltSensor(enabled = settings.gyroTilt) {
             val palette = LocalAMzPalette.current
             val hazeState = remember { HazeState() }
+            val fingerTracker = remember { FingerTracker() }
 
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(palette.background)
+                    .pointerInput(Unit) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                val pressed = event.changes.filter { it.pressed }
+                                fingerTracker.position = pressed.firstOrNull()?.position ?: Offset.Unspecified
+                            }
+                        }
+                    }
             ) {
+                // Aurora lives outside the haze source so its animation does not
+                // force all glass surfaces to re-blur every frame.
                 if (activeTab.url.isBlank()) {
-                    AuroraBackground()
+                    AuroraBackground(fingerTracker = fingerTracker)
                 }
                 // Main viewport (Start Page or live WebView)
-                Box(modifier = Modifier.fillMaxSize()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .hazeSource(hazeState)
+                ) {
                     if (activeTab.url.isBlank()) {
                         AMzStartPage(
                             userName = settings.userName,
@@ -288,35 +342,24 @@ fun AMzBrowserRoot(
                             onOpenUrl = { navigate(it) }
                         )
                     } else {
-                        val wv = remember(activeTab.id) {
-                            tabManager.ensureWebView(
-                                tabId = activeTab.id,
-                                context = context,
-                                isDarkTheme = palette.isDark,
-                                textZoom = settings.textZoom,
-                                isAdShieldEnabled = { settings.adShield },
-                                isHttpsOnlyEnabled = { settings.httpsOnly },
-                                onAdBlocked = { scope.launch { repo.incrementShieldCounters(ads = 1) } },
-                                onPopupBlocked = { scope.launch { repo.incrementShieldCounters(popups = 1) } },
-                                onRedirectBlocked = { target ->
-                                    blockedRedirectUrl = target
-                                    scope.launch { repo.incrementShieldCounters(redirects = 1) }
-                                },
-                                onPageFinished = { _, url, title, blocked, isPriv ->
-                                    if (!isPriv) scope.launch { repo.recordHistory(title, url) }
-                                    // Shield counters are always visible in the Shield Report; avoid a
-                // toast on every page load / search.
-                                },
-                                onRequestFileChooser = onRequestFileChooser
+                        val wv = activeTab.webView
+                        if (wv == null) {
+                            // ensureWebView writes to the tab StateFlow, so it must
+                            // never be called from a remember initializer during
+                            // composition (that schedules another recomposition).
+                            LaunchedEffect(activeTab.id) {
+                                ensureActiveWebView()
+                            }
+                            Box(Modifier.fillMaxSize())
+                        } else {
+                            AndroidView(
+                                factory = { wv },
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .statusBarsPadding()
+                                    .padding(bottom = 112.dp)
                             )
                         }
-                        AndroidView(
-                            factory = { wv },
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .statusBarsPadding()
-                                .padding(bottom = 112.dp)
-                        )
                     }
                 }
 
@@ -419,7 +462,9 @@ fun AMzBrowserRoot(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .navigationBarsPadding()
-                        .imePadding()
+                        // windowSoftInputMode=adjustResize already shrinks the
+                        // window; adding imePadding() here double-counted the IME
+                        // height and made the whole viewport jump on keyboard open.
                         .padding(12.dp)
                 )
 
@@ -747,8 +792,12 @@ private fun AMzFloatingNavPanel(
     var suggestions by remember { mutableStateOf<List<String>>(emptyList()) }
 
     // Keep the text stable while the user types; only follow the page URL when not editing.
+    // rememberUpdatedState is essential here: a plain capture would stay false
+    // forever, so a URL update during typing would overwrite the query mid-keystroke
+    // and make the omnibox visibly jump/flicker.
+    val currentEditing by rememberUpdatedState(editing)
     LaunchedEffect(host) {
-        if (!editing) query = host
+        if (!currentEditing) query = host
     }
 
     LaunchedEffect(query, editing, searchEngine) {
@@ -1291,7 +1340,7 @@ private fun AMzSetupOverlay(
             .fillMaxSize()
             .background(palette.background)
     ) {
-        AuroraBackground()
+        AuroraBackground(fingerTracker = null)
         TiltCard(gyroEnabled = settings.gyroTilt) {
             GlassSurface(
                 cornerRadius = 34.dp,

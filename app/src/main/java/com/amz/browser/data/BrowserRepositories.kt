@@ -11,6 +11,7 @@ import com.amz.browser.search.SearchEngine
 import com.amz.browser.ui.theme.AnimationSpeed
 import com.amz.browser.ui.theme.ThemeMode
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -87,7 +88,7 @@ class SettingsRepo(private val context: Context) {
             textZoom = p[TEXT_ZOOM] ?: 100,
             cardResultsBeta = p[CARD_BETA] ?: false
         )
-    }
+    }.distinctUntilChanged()
 
     val shieldStats: Flow<ShieldStats> = context.amzDataStore.data.map { p ->
         ShieldStats(
@@ -95,22 +96,22 @@ class SettingsRepo(private val context: Context) {
             popupsStopped = p[POPUPS_STOPPED] ?: 0,
             redirectsStopped = p[REDIRECTS_STOPPED] ?: 0
         )
-    }
+    }.distinctUntilChanged()
 
     val bookmarks: Flow<List<BookmarkEntry>> = context.amzDataStore.data.map { prefs ->
         prefs[BOOKMARKS_JSON]?.let { runCatching { json.decodeFromString<List<BookmarkEntry>>(it) }.getOrNull() }
             ?: emptyList()
-    }
+    }.distinctUntilChanged()
 
     val history: Flow<List<HistoryEntry>> = context.amzDataStore.data.map { prefs ->
         prefs[HISTORY_JSON]?.let { runCatching { json.decodeFromString<List<HistoryEntry>>(it) }.getOrNull() }
             ?: emptyList()
-    }
+    }.distinctUntilChanged()
 
     val persistedTabs: Flow<List<PersistedTab>> = context.amzDataStore.data.map { prefs ->
         prefs[TABS_JSON]?.let { runCatching { json.decodeFromString<List<PersistedTab>>(it) }.getOrNull() }
             ?: emptyList()
-    }
+    }.distinctUntilChanged()
 
     suspend fun update(transform: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
         context.amzDataStore.edit(transform)
