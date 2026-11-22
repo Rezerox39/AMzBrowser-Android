@@ -30,7 +30,7 @@ fun GlassSurface(
     content: @Composable BoxScope.() -> Unit
 ) {
     val palette = LocalAMzPalette.current
-    val tilt = LocalTiltState.current
+    val tiltController = LocalTiltController.current
     val shape = RoundedCornerShape(cornerRadius)
 
     val blurModifier = if (palette.glassBlurEnabled && hazeState != null) {
@@ -40,8 +40,8 @@ fun GlassSurface(
                 backgroundColor = palette.card,
                 tint = HazeTint(palette.card.copy(alpha = 0.10f)),
                 fallbackTint = HazeTint(palette.card.copy(alpha = 0.65f)),
-                blurRadius = 16.dp,
-                noiseFactor = 0.015f
+                blurRadius = 10.dp,
+                noiseFactor = 0.01f
             )
         )
     } else {
@@ -73,8 +73,8 @@ fun GlassSurface(
             .drawWithContent {
                 drawContent()
                 val sheenCenter = Offset(
-                    x = size.width * (0.5f + tilt.x * 0.42f),
-                    y = size.height * (0.25f + tilt.y * 0.42f)
+                    x = size.width * (0.5f + tiltController.x * 0.42f),
+                    y = size.height * (0.25f + tiltController.y * 0.42f)
                 )
                 drawRect(
                     brush = Brush.radialGradient(

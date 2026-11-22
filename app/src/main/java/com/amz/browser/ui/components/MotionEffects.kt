@@ -14,6 +14,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
@@ -68,14 +69,19 @@ fun Modifier.jellyClickable(
         }
 }
 
+/** Stable holder for the live touch glow. Read inside draw blocks only. */
+class FingerTracker {
+    var position by mutableStateOf(Offset.Unspecified)
+}
+
 @Composable
 fun AuroraBackground(
-    fingerPosition: Offset,
+    fingerTracker: FingerTracker? = null,
     modifier: Modifier = Modifier
 ) {
     val palette = LocalAMzPalette.current
     val transition = rememberInfiniteTransition(label = "aurora")
-    val driftDuration = (14000 * palette.speedFactor).toInt().coerceAtLeast(1000)
+    val driftDuration = (16000 * palette.speedFactor).toInt().coerceAtLeast(1000)
 
     val phase by transition.animateFloat(
         initialValue = 0f,
@@ -91,25 +97,17 @@ fun AuroraBackground(
         initialValue = 0f,
         targetValue = 360f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = driftDuration * 2, easing = LinearEasing),
+            animation = tween(durationMillis = driftDuration * 3, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
         label = "auroraRotation"
-    )
-    val breathe by transition.animateFloat(
-        initialValue = 0.88f,
-        targetValue = 1.12f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = (driftDuration * 0.65f).toInt(), easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "auroraBreathe"
     )
 
     Canvas(modifier = modifier.fillMaxSize()) {
         val w = size.width
         val h = size.height
         val t = phase * 2f - 1f
+        val breathe = 0.94f + phase * 0.12f
         val rad = Math.toRadians(rotation.toDouble())
         val cos = Math.cos(rad).toFloat()
         val sin = Math.sin(rad).toFloat()
@@ -122,38 +120,32 @@ fun AuroraBackground(
 
         drawCircle(
             brush = Brush.radialGradient(
-                colors = listOf(Color(0xFF5E5CE6).copy(alpha = 0.34f), Color.Transparent),
+                colors = listOf(Color(0xFF5E5CE6).copy(alpha = 0.30f), Color.Transparent),
                 center = orbit(0.18f, 0.14f, 0.10f),
-                radius = w * 0.66f * breathe
+                radius = w * 0.56f * breathe
             )
         )
         drawCircle(
             brush = Brush.radialGradient(
-                colors = listOf(palette.accent.copy(alpha = 0.32f), Color.Transparent),
+                colors = listOf(palette.accent.copy(alpha = 0.28f), Color.Transparent),
                 center = orbit(0.84f, 0.36f, 0.12f),
-                radius = w * 0.70f / breathe
+                radius = w * 0.58f / breathe
             )
         )
         drawCircle(
             brush = Brush.radialGradient(
-                colors = listOf(Color(0xFFFF2D55).copy(alpha = 0.24f), Color.Transparent),
+                colors = listOf(Color(0xFFFF2D55).copy(alpha = 0.20f), Color.Transparent),
                 center = orbit(0.28f, 0.82f, 0.11f),
-                radius = w * 0.60f * breathe
+                radius = w * 0.50f * breathe
             )
         )
-        drawCircle(
-            brush = Brush.radialGradient(
-                colors = listOf(Color(0xFF30D158).copy(alpha = 0.16f), Color.Transparent),
-                center = orbit(0.72f, 0.74f, 0.14f),
-                radius = w * 0.50f / breathe
-            )
-        )
-        if (fingerPosition != Offset.Unspecified) {
+        val finger = fingerTracker?.position ?: Offset.Unspecified
+        if (finger != Offset.Unspecified) {
             drawCircle(
                 brush = Brush.radialGradient(
-                    colors = listOf(Color(0xFF64D2FF).copy(alpha = 0.26f), Color.Transparent),
-                    center = fingerPosition,
-                    radius = w * 0.45f * breathe
+                    colors = listOf(Color(0xFF64D2FF).copy(alpha = 0.22f), Color.Transparent),
+                    center = finger,
+                    radius = w * 0.38f * breathe
                 )
             )
         }

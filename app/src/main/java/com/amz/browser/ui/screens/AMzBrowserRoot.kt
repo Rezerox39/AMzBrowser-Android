@@ -115,6 +115,7 @@ import com.amz.browser.search.SearchEngine
 import com.amz.browser.search.SuggestionsClient
 import com.amz.browser.shield.ShieldInjector
 import com.amz.browser.ui.components.AuroraBackground
+import com.amz.browser.ui.components.FingerTracker
 import com.amz.browser.ui.components.GlassSurface
 import com.amz.browser.ui.components.ProvideTiltSensor
 import com.amz.browser.ui.components.TiltCard
@@ -148,6 +149,18 @@ private val DefaultFavorites = listOf(
     FavoritePreset("Music", R.drawable.ic_fav_music, 0xFFFF2D55L, "https://music.apple.com"),
     FavoritePreset("Example", R.drawable.ic_fav_example, 0xFF0A84FFL, "https://example.com")
 )
+
+private fun siteIconFor(host: String): Int? = when {
+    host.contains("music.apple.com") -> R.drawable.ic_site_music
+    host.contains("apple.com") -> R.drawable.ic_site_apple
+    host.contains("wikipedia.org") -> R.drawable.ic_site_wikipedia
+    host.contains("youtube.com") || host.contains("youtu.be") -> R.drawable.ic_site_youtube
+    host.contains("github.com") -> R.drawable.ic_site_github
+    host.contains("openstreetmap.org") -> R.drawable.ic_site_maps
+    host.contains("news.ycombinator.com") -> R.drawable.ic_site_news
+    host.contains("example.com") -> R.drawable.ic_site_example
+    else -> null
+}
 
 @Composable
 fun AMzBrowserRoot(
@@ -257,7 +270,7 @@ fun AMzBrowserRoot(
         ProvideTiltSensor(enabled = settings.gyroTilt) {
             val palette = LocalAMzPalette.current
             val hazeState = remember { HazeState() }
-            var fingerPosition by remember { mutableStateOf(Offset.Unspecified) }
+            val fingerTracker = remember { FingerTracker() }
 
             Box(
                 modifier = Modifier
@@ -268,11 +281,16 @@ fun AMzBrowserRoot(
                             while (true) {
                                 val event = awaitPointerEvent(PointerEventPass.Initial)
                                 val pressed = event.changes.filter { it.pressed }
-                                fingerPosition = pressed.firstOrNull()?.position ?: Offset.Unspecified
+                                fingerTracker.position = pressed.firstOrNull()?.position ?: Offset.Unspecified
                             }
                         }
                     }
             ) {
+                // Aurora lives outside the haze source so its animation does not
+                // force all glass surfaces to re-blur every frame.
+                if (activeTab.url.isBlank()) {
+                    AuroraBackground(fingerTracker = fingerTracker)
+                }
                 // Main viewport (Start Page or live WebView)
                 Box(
                     modifier = Modifier
@@ -280,7 +298,6 @@ fun AMzBrowserRoot(
                         .hazeSource(hazeState)
                 ) {
                     if (activeTab.url.isBlank()) {
-                        AuroraBackground(fingerPosition = fingerPosition)
                         AMzStartPage(
                             userName = settings.userName,
                             isPrivate = activeTab.isPrivate,
@@ -614,34 +631,38 @@ private fun AMzStartPage(
                     ) {
                         row.forEach { fav ->
                             DelayedReveal(DefaultFavorites.indexOf(fav)) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier
-                                    .width(74.dp)
-                                    .jellyClickable { onOpenUrl(fav.url) }
-                            ) {
-                                Box(
-                                    contentAlignment = Alignment.Center,
-                                    modifier = Modifier
-                                        .size(60.dp)
-                                        .clip(RoundedCornerShape(16.dp))
-                                        .background(Color(fav.color))
+                                TiltCard(
+                                    gyroEnabled = gyroEnabled,
+                                    maxDegrees = 12f,
+                                    modifier = Modifier.width(74.dp)
                                 ) {
-                                    Image(
-                                        painter = painterResource(fav.iconRes),
-                                        contentDescription = fav.name,
-                                        modifier = Modifier.size(30.dp)
-                                    )
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        modifier = Modifier.jellyClickable { onOpenUrl(fav.url) }
+                                    ) {
+                                        Box(
+                                            contentAlignment = Alignment.Center,
+                                            modifier = Modifier
+                                                .size(60.dp)
+                                                .clip(RoundedCornerShape(16.dp))
+                                                .background(Color(fav.color))
+                                        ) {
+                                            Image(
+                                                painter = painterResource(fav.iconRes),
+                                                contentDescription = fav.name,
+                                                modifier = Modifier.size(30.dp)
+                                            )
+                                        }
+                                        Spacer(Modifier.height(6.dp))
+                                        Text(
+                                            text = fav.name,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = palette.textPrimary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
                                 }
-                                Spacer(Modifier.height(6.dp))
-                                Text(
-                                    text = fav.name,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = palette.textPrimary,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
                             }
                         }
                     }
@@ -653,7 +674,7 @@ private fun AMzStartPage(
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Shield Report", style = MaterialTheme.typography.headlineSmall, color = palette.textPrimary)
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    TiltCard(gyroEnabled = gyroEnabled, modifier = Modifier.weight(1f)) { _, _ ->
+                    TiltCard(gyroEnabled = gyroEnabled, modifier = Modifier.weight(1f)) {
                         GlassSurface(cornerRadius = 22.dp, hazeState = hazeState, modifier = Modifier.fillMaxWidth()) {
                             Column(modifier = Modifier.padding(16.dp)) {
                                 Text(
@@ -666,7 +687,7 @@ private fun AMzStartPage(
                             }
                         }
                     }
-                    TiltCard(gyroEnabled = gyroEnabled, modifier = Modifier.weight(1f)) { _, _ ->
+                    TiltCard(gyroEnabled = gyroEnabled, modifier = Modifier.weight(1f)) {
                         GlassSurface(cornerRadius = 22.dp, hazeState = hazeState, modifier = Modifier.fillMaxWidth()) {
                             Column(modifier = Modifier.padding(16.dp)) {
                                 Text(
@@ -739,6 +760,7 @@ private fun AMzFloatingNavPanel(
     val palette = LocalAMzPalette.current
     val host = remember(currentUrl) { runCatching { URI(currentUrl).host?.removePrefix("www.") }.getOrNull().orEmpty() }
     val isHttps = currentUrl.startsWith("https://", true)
+    val siteIcon = remember(host) { siteIconFor(host) }
 
     var query by remember { mutableStateOf(host) }
     var editing by remember { mutableStateOf(false) }
@@ -818,12 +840,20 @@ private fun AMzFloatingNavPanel(
                     contentAlignment = Alignment.CenterStart
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                        androidx.compose.material3.Icon(
-                            imageVector = if (isHttps && !editing) Icons.Rounded.Lock else Icons.Rounded.Search,
-                            contentDescription = null,
-                            tint = if (isHttps && !editing) palette.success else palette.textSecondary,
-                            modifier = Modifier.size(18.dp)
-                        )
+                        if (!editing && siteIcon != null) {
+                            Image(
+                                painter = painterResource(siteIcon),
+                                contentDescription = null,
+                                modifier = Modifier.size(19.dp)
+                            )
+                        } else {
+                            androidx.compose.material3.Icon(
+                                imageVector = if (isHttps && !editing) Icons.Rounded.Lock else Icons.Rounded.Search,
+                                contentDescription = null,
+                                tint = if (isHttps && !editing) palette.success else palette.textSecondary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                         Spacer(Modifier.width(8.dp))
                         BasicTextField(
                             value = query,
@@ -944,7 +974,7 @@ private fun AMzTabSwitcherOverlay(
             modifier = Modifier.weight(1f)
         ) {
             items(tabs, key = { it.id }) { tab ->
-                TiltCard(gyroEnabled = gyroEnabled) { _, _ ->
+                TiltCard(gyroEnabled = gyroEnabled) {
                     GlassSurface(
                         cornerRadius = 20.dp,
                         hazeState = hazeState,
@@ -1281,8 +1311,8 @@ private fun AMzSetupOverlay(
             .fillMaxSize()
             .background(palette.background)
     ) {
-        AuroraBackground(fingerPosition = Offset.Unspecified)
-        TiltCard(gyroEnabled = settings.gyroTilt) { _, _ ->
+        AuroraBackground(fingerTracker = null)
+        TiltCard(gyroEnabled = settings.gyroTilt) {
             GlassSurface(
                 cornerRadius = 34.dp,
                 hazeState = hazeState,

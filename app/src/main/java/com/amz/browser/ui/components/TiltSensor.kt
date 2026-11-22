@@ -7,18 +7,14 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.Handler
 import android.os.Looper
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.Spring
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -31,10 +27,21 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlin.math.PI
 
-@Immutable
-data class TiltState(val x: Float = 0f, val y: Float = 0f)
+/**
+ * Stable holder for high-frequency tilt values. Values are read only inside draw /
+ * graphics-layer blocks, so sensor updates never trigger recomposition.
+ */
+class TiltController {
+    var x by mutableFloatStateOf(0f)
+    var y by mutableFloatStateOf(0f)
 
-val LocalTiltState = staticCompositionLocalOf { TiltState() }
+    fun update(nx: Float, ny: Float) {
+        x = nx
+        y = ny
+    }
+}
+
+val LocalTiltController = staticCompositionLocalOf { TiltController() }
 
 @Composable
 fun ProvideTiltSensor(
@@ -43,11 +50,11 @@ fun ProvideTiltSensor(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    var tilt by remember { mutableStateOf(TiltState()) }
+    val controller = remember { TiltController() }
 
     DisposableEffect(enabled, lifecycleOwner) {
         if (!enabled) {
-            tilt = TiltState(0f, 0f)
+            controller.update(0f, 0f)
             return@DisposableEffect onDispose {}
         }
 
@@ -80,8 +87,9 @@ fun ProvideTiltSensor(
                 }
                 filteredX += alpha * (rawX - filteredX)
                 filteredY += alpha * (rawY - filteredY)
-                val next = TiltState(filteredX, filteredY)
-                mainHandler.post { tilt = next }
+                val nextX = filteredX
+                val nextY = filteredY
+                mainHandler.post { controller.update(nextX, nextY) }
             }
 
             override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
@@ -109,7 +117,7 @@ fun ProvideTiltSensor(
         }
     }
 
-    CompositionLocalProvider(LocalTiltState provides tilt, content = content)
+    CompositionLocalProvider(LocalTiltController provides controller, content = content)
 }
 
 @Composable
@@ -117,52 +125,42 @@ fun TiltCard(
     modifier: Modifier = Modifier,
     gyroEnabled: Boolean = true,
     maxDegrees: Float = 9f,
-    content: @Composable BoxScope.(parallaxX: Float, parallaxY: Float) -> Unit
+    content: @Composable BoxScope.() -> Unit
 ) {
-    val sensorTilt = LocalTiltState.current
-    var touchTilt by remember { mutableStateOf(TiltState()) }
-    val activeTilt = if (gyroEnabled) sensorTilt else touchTilt
-
-    val rotationX by animateFloatAsState(
-        targetValue = -activeTilt.y * maxDegrees,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioLowBouncy,
-            stiffness = Spring.StiffnessLow
-        ),
-        label = "tiltX"
-    )
-    val rotationY by animateFloatAsState(
-        targetValue = activeTilt.x * maxDegrees,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioLowBouncy,
-            stiffness = Spring.StiffnessLow
-        ),
-        label = "tiltY"
-    )
+    val controller = LocalTiltController.current
+    var touchX by remember { mutableFloatStateOf(0f) }
+    var touchY by remember { mutableFloatStateOf(0f) }
 
     Box(
         modifier = modifier
             .pointerInput(gyroEnabled) {
                 if (!gyroEnabled) {
                     detectDragGestures(
-                        onDragEnd = { touchTilt = TiltState() },
-                        onDragCancel = { touchTilt = TiltState() },
+                        onDragEnd = {
+                            touchX = 0f
+                            touchY = 0f
+                        },
+                        onDragCancel = {
+                            touchX = 0f
+                            touchY = 0f
+                        },
                         onDrag = { change, _ ->
-                            val nx = ((change.position.x / size.width.coerceAtLeast(1)) - 0.5f) * 2f
-                            val ny = ((change.position.y / size.height.coerceAtLeast(1)) - 0.5f) * 2f
-                            touchTilt = TiltState(nx.coerceIn(-1f, 1f), ny.coerceIn(-1f, 1f))
+                            touchX = (((change.position.x / size.width.coerceAtLeast(1)) - 0.5f) * 2f).coerceIn(-1f, 1f)
+                            touchY = (((change.position.y / size.height.coerceAtLeast(1)) - 0.5f) * 2f).coerceIn(-1f, 1f)
                         }
                     )
                 }
             }
             .graphicsLayer {
-                this.rotationX = rotationX
-                this.rotationY = rotationY
+                val tx = if (gyroEnabled) controller.x else touchX
+                val ty = if (gyroEnabled) controller.y else touchY
+                rotationX = -ty * maxDegrees
+                rotationY = tx * maxDegrees
                 cameraDistance = 14f * density
-                translationX = activeTilt.x * 4f
-                translationY = activeTilt.y * 4f
+                translationX = tx * 4f
+                translationY = ty * 4f
             }
     ) {
-        content(activeTilt.x, activeTilt.y)
+        content()
     }
 }
