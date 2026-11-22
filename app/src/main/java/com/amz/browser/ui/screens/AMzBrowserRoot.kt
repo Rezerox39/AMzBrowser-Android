@@ -168,13 +168,13 @@ private data class FavoritePreset(
 
 private val DefaultFavorites = listOf(
     FavoritePreset("Apple", R.drawable.ic_fav_apple, 0xFF1D1D1FL, "https://www.apple.com"),
-    FavoritePreset("Wikipedia", R.drawable.ic_fav_wikipedia, 0xFF8E8E93L, "https://en.wikipedia.org"),
+    FavoritePreset("Wikipedia", R.drawable.ic_fav_wikipedia, 0xFF3F3F46L, "https://en.wikipedia.org"),
     FavoritePreset("YouTube", R.drawable.ic_fav_youtube, 0xFFFF3B30L, "https://www.youtube.com"),
     FavoritePreset("GitHub", R.drawable.ic_fav_github, 0xFF2C2C30L, "https://github.com"),
     FavoritePreset("Maps", R.drawable.ic_fav_maps, 0xFF30D158L, "https://www.openstreetmap.org"),
     FavoritePreset("News", R.drawable.ic_fav_news, 0xFFFF9F0AL, "https://news.ycombinator.com"),
     FavoritePreset("Music", R.drawable.ic_fav_music, 0xFFFF2D55L, "https://music.apple.com"),
-    FavoritePreset("Example", R.drawable.ic_fav_example, 0xFF0A84FFL, "https://example.com")
+    FavoritePreset("Mail", R.drawable.ic_fav_mail, 0xFF0A84FFL, "https://mail.google.com")
 )
 
 private fun siteIconFor(host: String): Int? = when {
@@ -186,6 +186,7 @@ private fun siteIconFor(host: String): Int? = when {
     host.contains("openstreetmap.org") -> R.drawable.ic_site_maps
     host.contains("news.ycombinator.com") -> R.drawable.ic_site_news
     host.contains("example.com") -> R.drawable.ic_site_example
+    host.contains("mail.google.com") -> R.drawable.ic_fav_mail
     else -> null
 }
 
@@ -867,13 +868,39 @@ private fun AMzStartPage(
             }
         }
 
-        if (history.isNotEmpty()) {
-            item(key = "recent") {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Recently Visited", style = MaterialTheme.typography.headlineSmall, color = palette.textPrimary)
-                    GlassSurface(cornerRadius = 22.dp, hazeState = hazeState, modifier = Modifier.fillMaxWidth()) {
+        item(key = "recent") {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Recently Visited", style = MaterialTheme.typography.headlineSmall, color = palette.textPrimary)
+                GlassSurface(cornerRadius = 22.dp, hazeState = hazeState, modifier = Modifier.fillMaxWidth()) {
+                    if (history.isEmpty()) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            androidx.compose.material3.Icon(
+                                Icons.Rounded.History,
+                                contentDescription = null,
+                                tint = palette.accent.copy(alpha = 0.7f),
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                "Nothing here yet",
+                                color = palette.textPrimary,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 15.sp
+                            )
+                            Text(
+                                "Pages you visit will show up here.",
+                                color = palette.textSecondary,
+                                fontSize = 13.sp
+                            )
+                        }
+                    } else {
                         Column(modifier = Modifier.padding(vertical = 4.dp)) {
-                            history.take(4).forEach { entry ->
+                            history.take(3).forEach { entry ->
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -889,7 +916,7 @@ private fun AMzStartPage(
                                     )
                                     Spacer(Modifier.width(10.dp))
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Text(entry.title, color = palette.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(entry.title.ifBlank { entry.url }, color = palette.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                         Text(entry.url, style = MaterialTheme.typography.labelMedium, color = palette.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     }
                                 }
@@ -1145,7 +1172,7 @@ private fun AMzFloatingNavPanel(
                             modifier = Modifier
                                 .align(Alignment.TopEnd)
                                 .padding(top = 4.dp, end = 4.dp)
-                                .size(17.dp)
+                                .size(18.dp)
                                 .clip(CircleShape)
                                 .background(palette.accent)
                         ) {

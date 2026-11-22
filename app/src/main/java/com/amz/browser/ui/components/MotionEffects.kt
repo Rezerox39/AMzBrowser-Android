@@ -109,15 +109,23 @@ fun AuroraBackground(
     val transition = rememberInfiniteTransition(label = "aurora")
     val driftDuration = (16000 * palette.speedFactor).toInt().coerceAtLeast(1000)
 
-    val phase by transition.animateFloat(
+    @Composable
+    fun driftPhase(label: String, durationScale: Float) = transition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = driftDuration, easing = LinearEasing),
+            animation = tween(
+                durationMillis = (driftDuration * durationScale).toInt().coerceAtLeast(1000),
+                easing = LinearEasing
+            ),
             repeatMode = RepeatMode.Reverse
         ),
-        label = "drift"
+        label = label
     )
+
+    val phase1 by driftPhase("driftOne", 1f)
+    val phase2 by driftPhase("driftTwo", 1.35f)
+    val phase3 by driftPhase("driftThree", 0.82f)
 
     val rotation by transition.animateFloat(
         initialValue = 0f,
@@ -132,36 +140,34 @@ fun AuroraBackground(
     Canvas(modifier = modifier.fillMaxSize()) {
         val w = size.width
         val h = size.height
-        val t = phase * 2f - 1f
-        val breathe = 0.94f + phase * 0.12f
+        val breathe = 0.94f + phase1 * 0.12f
         val rad = Math.toRadians(rotation.toDouble())
         val cos = Math.cos(rad).toFloat()
         val sin = Math.sin(rad).toFloat()
 
-        fun orbit(baseX: Float, baseY: Float, radius: Float): Offset {
-            val x = baseX + cos * radius * t
-            val y = baseY + sin * radius * t
-            return Offset(x * w, y * h)
+        fun orbit(baseX: Float, baseY: Float, radius: Float, phase: Float): Offset {
+            val t = phase * 2f - 1f
+            return Offset((baseX + cos * radius * t) * w, (baseY + sin * radius * t) * h)
         }
 
         drawCircle(
             brush = Brush.radialGradient(
                 colors = listOf(Color(0xFF5E5CE6).copy(alpha = 0.30f), Color.Transparent),
-                center = orbit(0.18f, 0.14f, 0.10f),
+                center = orbit(0.18f, 0.14f, 0.10f, phase1),
                 radius = w * 0.56f * breathe
             )
         )
         drawCircle(
             brush = Brush.radialGradient(
                 colors = listOf(palette.accent.copy(alpha = 0.28f), Color.Transparent),
-                center = orbit(0.84f, 0.36f, 0.12f),
+                center = orbit(0.84f, 0.36f, 0.12f, phase2),
                 radius = w * 0.58f / breathe
             )
         )
         drawCircle(
             brush = Brush.radialGradient(
                 colors = listOf(Color(0xFFFF2D55).copy(alpha = 0.20f), Color.Transparent),
-                center = orbit(0.28f, 0.82f, 0.11f),
+                center = orbit(0.28f, 0.82f, 0.11f, phase3),
                 radius = w * 0.50f * breathe
             )
         )
