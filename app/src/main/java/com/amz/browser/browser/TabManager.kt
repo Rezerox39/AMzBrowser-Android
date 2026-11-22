@@ -137,9 +137,8 @@ class TabManagerViewModel : ViewModel() {
         )
 
         updateTab(tabId) { it.copy(webView = created) }
-        if (!tab?.url.isNullOrBlank()) {
-            created.loadUrl(tab!!.url)
-        }
+        // Loading is owned by the UI through ensureActiveWebView(), which checks
+        // webView.url first. Loading here as well caused duplicate navigations.
         return created
     }
 

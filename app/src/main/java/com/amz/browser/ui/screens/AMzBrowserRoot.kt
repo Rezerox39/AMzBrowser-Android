@@ -3,6 +3,7 @@ package com.amz.browser.ui.screens
 import com.amz.browser.R
 import android.content.Intent
 import android.net.Uri
+import android.view.ViewGroup
 import android.webkit.ValueCallback
 import android.webkit.WebView
 import androidx.activity.compose.BackHandler
@@ -73,6 +74,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
@@ -91,6 +93,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -120,6 +123,7 @@ import com.amz.browser.ui.components.FingerTracker
 import com.amz.browser.ui.components.GlassSurface
 import com.amz.browser.ui.components.LocalTiltController
 import com.amz.browser.ui.components.ProvideTiltSensor
+import com.amz.browser.ui.components.SheetScrim
 import com.amz.browser.ui.components.TiltCard
 import com.amz.browser.ui.components.TiltDebugOverlay
 import com.amz.browser.ui.components.tiltDebugLongPress
@@ -138,6 +142,7 @@ import java.net.URI
 import java.util.Calendar
 import java.util.concurrent.atomic.AtomicIntegerArray
 
+@Immutable
 private data class FavoritePreset(
     val name: String,
     val iconRes: Int,
@@ -252,34 +257,38 @@ fun AMzBrowserRoot(
         }
     }
 
-    fun ensureActiveWebView(): WebView = tabManager.ensureWebView(
-        tabId = activeTab.id,
-        context = context,
-        isDarkTheme = settings.themeMode == ThemeMode.DARK,
-        textZoom = settings.textZoom,
-        isAdShieldEnabled = { settings.adShield },
-        isHttpsOnlyEnabled = { settings.httpsOnly },
-        onAdBlocked = { queueShield(ads = 1) },
-        onPopupBlocked = { queueShield(popups = 1) },
-        onRedirectBlocked = { target ->
-            blockedRedirectUrl = target
-            queueShield(redirects = 1)
-        },
-        onPageFinished = { _, url, title, _, isPriv ->
-            if (!isPriv) scope.launch { repo.recordHistory(title, url) }
-        },
-        onRequestFileChooser = onRequestFileChooser
-    )
+    fun ensureActiveWebView(requestedUrl: String = activeTab.url): WebView {
+        val webView = tabManager.ensureWebView(
+            tabId = activeTab.id,
+            context = context,
+            isDarkTheme = settings.themeMode == ThemeMode.DARK,
+            textZoom = settings.textZoom,
+            isAdShieldEnabled = { settings.adShield },
+            isHttpsOnlyEnabled = { settings.httpsOnly },
+            onAdBlocked = { queueShield(ads = 1) },
+            onPopupBlocked = { queueShield(popups = 1) },
+            onRedirectBlocked = { target ->
+                blockedRedirectUrl = target
+                queueShield(redirects = 1)
+            },
+            onPageFinished = { _, url, title, _, isPriv ->
+                if (!isPriv) scope.launch { repo.recordHistory(title, url) }
+            },
+            onRequestFileChooser = onRequestFileChooser
+        )
+        // Idempotent: a recomposition or a re-attach must never reload the page.
+        if (requestedUrl.isNotBlank() && webView.url != requestedUrl) {
+            webView.loadUrl(requestedUrl)
+        }
+        return webView
+    }
 
     fun navigate(rawInput: String) {
         val (resolvedUrl, _) = OmniboxResolver.resolve(rawInput, settings.searchEngine, settings.httpsOnly)
         if (resolvedUrl.isBlank()) return
         blockedRedirectUrl = null
-        // Create the WebView before changing the URL so the composition never
-        // observes a URL-bearing tab with no WebView attached.
-        val wv = ensureActiveWebView()
         tabManager.updateTab(activeTab.id) { it.copy(url = resolvedUrl) }
-        wv.loadUrl(resolvedUrl)
+        ensureActiveWebView(resolvedUrl)
     }
 
     LaunchedEffect(initialUrl) {
@@ -308,7 +317,12 @@ fun AMzBrowserRoot(
     ) {
         ProvideTiltSensor(enabled = settings.gyroTilt) {
             val palette = LocalAMzPalette.current
-            val hazeState = remember { HazeState() }
+            val baseHazeState = remember { HazeState() }
+            // Never sample the live WebView for backdrop blur: it produces grey
+            // and black frames when the surface is reallocated. When a page is
+            // loaded we hand null to every GlassSurface, so only the app-drawn
+            // aurora is ever blurred.
+            val hazeState: HazeState? = if (activeTab.url.isBlank()) baseHazeState else null
             val fingerTracker = remember { FingerTracker() }
 
             Box(
@@ -325,48 +339,49 @@ fun AMzBrowserRoot(
                         }
                     }
             ) {
-                // Aurora lives outside the haze source so its animation does not
-                // force all glass surfaces to re-blur every frame.
                 if (activeTab.url.isBlank()) {
-                    AuroraBackground(fingerTracker = fingerTracker)
-                }
-                // Main viewport (Start Page or live WebView)
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .hazeSource(hazeState)
-                ) {
-                    if (activeTab.url.isBlank()) {
-                        AMzStartPage(
-                            userName = settings.userName,
-                            isPrivate = activeTab.isPrivate,
-                            stats = shieldStats,
-                            history = history,
-                            gyroEnabled = settings.gyroTilt,
-                            hazeState = hazeState,
-                            onOpenUrl = { navigate(it) },
-                            showTiltDebug = showTiltDebug,
-                            onToggleTiltDebug = { showTiltDebug = !showTiltDebug }
-                        )
-                    } else {
-                        val wv = activeTab.webView
-                        if (wv == null) {
-                            // ensureWebView writes to the tab StateFlow, so it must
-                            // never be called from a remember initializer during
-                            // composition (that schedules another recomposition).
-                            LaunchedEffect(activeTab.id) {
-                                ensureActiveWebView()
-                            }
-                            Box(Modifier.fillMaxSize())
-                        } else {
-                            AndroidView(
-                                factory = { wv },
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .statusBarsPadding()
-                                    .padding(bottom = 112.dp)
-                            )
+                    // Only the app-drawn aurora is a blur source.
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .hazeSource(baseHazeState)
+                    ) {
+                        AuroraBackground(fingerTracker = fingerTracker)
+                    }
+                    AMzStartPage(
+                        userName = settings.userName,
+                        isPrivate = activeTab.isPrivate,
+                        stats = shieldStats,
+                        history = history,
+                        gyroEnabled = settings.gyroTilt,
+                        hazeState = hazeState,
+                        onOpenUrl = { navigate(it) },
+                        showTiltDebug = showTiltDebug,
+                        onToggleTiltDebug = { showTiltDebug = !showTiltDebug }
+                    )
+                } else {
+                    val wv = activeTab.webView
+                    if (wv == null) {
+                        // ensureWebView writes to the tab StateFlow, so it must
+                        // never be called from a remember initializer during
+                        // composition (that schedules another recomposition).
+                        LaunchedEffect(activeTab.id) {
+                            ensureActiveWebView()
                         }
+                        Box(Modifier.fillMaxSize())
+                    } else {
+                        AndroidView(
+                            factory = {
+                                wv.also { view ->
+                                    // A tab switch can reuse this instance; detach
+                                    // it from the old Compose container first.
+                                    (view.parent as? ViewGroup)?.removeView(view)
+                                    view.setBackgroundColor(palette.background.toArgb())
+                                }
+                            },
+                            update = { it.setBackgroundColor(palette.background.toArgb()) },
+                            modifier = Modifier.fillMaxSize()
+                        )
                     }
                 }
 
@@ -632,7 +647,7 @@ private fun AMzStartPage(
     stats: ShieldStats,
     history: List<com.amz.browser.data.HistoryEntry>,
     gyroEnabled: Boolean,
-    hazeState: HazeState,
+    hazeState: HazeState?,
     onOpenUrl: (String) -> Unit,
     showTiltDebug: Boolean,
     onToggleTiltDebug: () -> Unit
@@ -653,7 +668,7 @@ private fun AMzStartPage(
         contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 28.dp, bottom = 180.dp),
         verticalArrangement = Arrangement.spacedBy(22.dp)
     ) {
-        item {
+        item(key = "greeting") {
             Column {
                 Text(
                     text = if (!isPrivate && userName.isNotBlank()) "$greeting,\n$userName" else greeting,
@@ -673,7 +688,7 @@ private fun AMzStartPage(
             }
         }
 
-        item {
+        item(key = "favorites") {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Favorites", style = MaterialTheme.typography.headlineSmall, color = palette.textPrimary)
                 DefaultFavorites.chunked(4).forEach { row ->
@@ -722,7 +737,7 @@ private fun AMzStartPage(
             }
         }
 
-        item {
+        item(key = "shield") {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Shield Report", style = MaterialTheme.typography.headlineSmall, color = palette.textPrimary)
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -757,7 +772,7 @@ private fun AMzStartPage(
         }
 
         if (history.isNotEmpty()) {
-            item {
+            item(key = "recent") {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Recently Visited", style = MaterialTheme.typography.headlineSmall, color = palette.textPrimary)
                     GlassSurface(cornerRadius = 22.dp, hazeState = hazeState, modifier = Modifier.fillMaxWidth()) {
@@ -799,7 +814,7 @@ private fun AMzFloatingNavPanel(
     canGoForward: Boolean,
     tabCount: Int,
     searchEngine: SearchEngine,
-    hazeState: HazeState,
+    hazeState: HazeState?,
     onSubmit: (String) -> Unit,
     onBack: () -> Unit,
     onForward: () -> Unit,
@@ -1002,7 +1017,7 @@ private fun AMzTabSwitcherOverlay(
     tabs: List<com.amz.browser.browser.BrowserTab>,
     activeTabId: String,
     gyroEnabled: Boolean,
-    hazeState: HazeState,
+    hazeState: HazeState?,
     onSelect: (String) -> Unit,
     onCloseTab: (String) -> Unit,
     onNewTab: () -> Unit,
@@ -1146,7 +1161,7 @@ private fun AMzQuickMenuSheet(
     isPrivate: Boolean,
     isDesktop: Boolean,
     isReader: Boolean,
-    hazeState: HazeState,
+    hazeState: HazeState?,
     onDismiss: () -> Unit,
     onToggleBookmark: () -> Unit,
     onFind: () -> Unit,
@@ -1159,11 +1174,9 @@ private fun AMzQuickMenuSheet(
 ) {
     val palette = LocalAMzPalette.current
     Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.36f))
-            .clickable(onClick = onDismiss)
+        modifier = Modifier.fillMaxSize()
     ) {
+        SheetScrim(onDismiss = onDismiss)
         GlassSurface(
             cornerRadius = 34.dp,
             hazeState = hazeState,
@@ -1353,7 +1366,7 @@ private fun AMzLibraryOverlay(
 @Composable
 private fun AMzSetupOverlay(
     settings: AppSettings,
-    hazeState: HazeState,
+    hazeState: HazeState?,
     onUpdateSettings: ((androidx.datastore.preferences.core.MutablePreferences) -> Unit) -> Unit,
     onFinish: () -> Unit,
     showTiltDebug: Boolean = false,

@@ -2,6 +2,7 @@ package com.amz.browser.ui.components
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
@@ -10,9 +11,11 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -68,6 +71,28 @@ fun Modifier.jellyClickable(
                 }
             )
         }
+}
+
+/**
+ * Full-window scrim for sheets. A plain solid drawRect (no blur, no alpha
+ * animation on an ancestor of the WebView) that covers the system bars too.
+ */
+@Composable
+fun SheetScrim(onDismiss: () -> Unit, targetAlpha: Float = 0.42f) {
+    var target by remember { mutableStateOf(0f) }
+    LaunchedEffect(Unit) { target = targetAlpha }
+    val alpha by animateFloatAsState(
+        targetValue = target,
+        animationSpec = tween(220),
+        label = "scrim"
+    )
+    Canvas(
+        modifier = Modifier
+            .fillMaxSize()
+            .clickable(onClick = onDismiss)
+    ) {
+        drawRect(color = Color.Black.copy(alpha = alpha))
+    }
 }
 
 /** Stable holder for the live touch glow. Read inside draw blocks only. */
