@@ -6,6 +6,7 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.Build
+import android.os.SystemClock
 import android.view.Display
 import android.view.Surface
 import android.view.WindowManager
@@ -58,6 +59,8 @@ private const val TILT_SCALE = 0.35f
 private const val MAX_DEGREES = 8f
 private const val FILTER_ALPHA = 0.15f
 private const val REFERENCE_DRIFT = 0.01f
+private const val TARGET_INTERVAL_MS = 32L
+private const val TARGET_MIN_DELTA = 0.05f
 
 private val TiltSpring: SpringSpec<Float> = spring(dampingRatio = 0.8f, stiffness = 120f)
 
@@ -94,6 +97,9 @@ class TiltController(animationScope: CoroutineScope? = null) {
         CoroutineScope(Dispatchers.Main.immediate + job)
     }
     private val targets = MutableSharedFlow<Pair<Float, Float>>(replay = 1, extraBufferCapacity = 1)
+    private var lastEmitTime = 0L
+    private var lastTargetX = Float.NaN
+    private var lastTargetY = Float.NaN
 
     init {
         scope.launch {
@@ -107,10 +113,23 @@ class TiltController(animationScope: CoroutineScope? = null) {
     fun update(tx: Float, ty: Float) {
         rawX = tx
         rawY = ty
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastEmitTime < TARGET_INTERVAL_MS) return
+        if (abs(tx - lastTargetX) < TARGET_MIN_DELTA &&
+            abs(ty - lastTargetY) < TARGET_MIN_DELTA
+        ) return
+        lastEmitTime = now
+        lastTargetX = tx
+        lastTargetY = ty
         targets.tryEmit(tx to ty)
     }
 
-    fun reset() = update(0f, 0f)
+    fun reset() {
+        lastEmitTime = 0L
+        lastTargetX = Float.NaN
+        lastTargetY = Float.NaN
+        update(0f, 0f)
+    }
 
     fun close() {
         scope.cancel()

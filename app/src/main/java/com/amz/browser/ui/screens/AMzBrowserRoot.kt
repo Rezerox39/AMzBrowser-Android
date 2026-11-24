@@ -93,6 +93,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -443,23 +444,37 @@ fun AMzBrowserRoot(
                             }
                             Box(Modifier.fillMaxSize())
                         } else {
-                            AndroidView(
-                                factory = {
+                            // Stable lambdas keep AndroidView from detaching/recreating
+                            // the WebView on unrelated recompositions.
+                            val factory: () -> WebView = remember(wv, activeTab.id) {
+                                {
                                     wv.also { view ->
                                         // A tab switch can reuse this instance; detach
                                         // it from the old Compose container first.
                                         (view.parent as? ViewGroup)?.removeView(view)
                                         view.setBackgroundColor(palette.background.toArgb())
                                     }
-                                },
-                                update = { view ->
+                                }
+                            }
+                            val updateView: (WebView) -> Unit = remember(
+                                wv,
+                                palette.background,
+                                settings.textZoom
+                            ) {
+                                { view ->
                                     view.setBackgroundColor(palette.background.toArgb())
                                     if (view.settings.textZoom != settings.textZoom) {
                                         view.settings.textZoom = settings.textZoom
                                     }
-                                },
-                                modifier = Modifier.fillMaxSize()
-                            )
+                                }
+                            }
+                            key(activeTab.id) {
+                                AndroidView(
+                                    factory = factory,
+                                    update = updateView,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
                         }
                     }
                 }
@@ -605,9 +620,7 @@ fun AMzBrowserRoot(
                         gyroEnabled = settings.gyroTilt,
                         hazeState = hazeState,
                         onSelect = { id ->
-                            // Capture the page we are leaving before its WebView is
-                            // detached, otherwise the thumbnail goes stale/blank.
-                            if (id != activeTab.id) tabManager.captureThumbnail(activeTab.id)
+                            // selectTab() captures the outgoing tab exactly once.
                             tabManager.selectTab(id)
                             showTabs = false
                         },
@@ -1240,6 +1253,7 @@ private fun AMzTabSwitcherOverlay(
             modifier = Modifier.weight(1f)
         ) {
             items(tabs, key = { it.id }) { tab ->
+                val thumbnail = remember(tab.thumbnail) { tab.thumbnail?.asImageBitmap() }
                 TiltCard(gyroEnabled = gyroEnabled) {
                     GlassSurface(
                         cornerRadius = 20.dp,
@@ -1259,9 +1273,9 @@ private fun AMzTabSwitcherOverlay(
                                         )
                                     )
                             ) {
-                                tab.thumbnail?.let { bmp ->
+                                thumbnail?.let { bmp ->
                                     Image(
-                                        bitmap = bmp.asImageBitmap(),
+                                        bitmap = bmp,
                                         contentDescription = tab.title,
                                         contentScale = ContentScale.Crop,
                                         modifier = Modifier.fillMaxSize()

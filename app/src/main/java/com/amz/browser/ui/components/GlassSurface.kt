@@ -40,8 +40,10 @@ fun GlassSurface(
                 backgroundColor = palette.card,
                 tint = HazeTint(palette.card.copy(alpha = 0.10f)),
                 fallbackTint = HazeTint(palette.card.copy(alpha = 0.65f)),
-                blurRadius = 10.dp,
-                noiseFactor = 0.01f
+                // 8dp is visually still glass but costs noticeably less to
+                // redraw while the aurora/tilt layers animate every frame.
+                blurRadius = 8.dp,
+                noiseFactor = 0f
             )
         )
     } else {

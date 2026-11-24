@@ -71,6 +71,10 @@ class TabManagerViewModel : ViewModel() {
 
         val tab = _tabs.value.find { it.id == tabId }
         val blocklist = BlocklistManager.getInstance(context)
+        // WebView reports progress several times per percent. Every write here
+        // replaces the tab list and recomposes the whole browser, so publish
+        // coarse steps and let 100 through immediately.
+        var lastProgress = -1
 
         val client = AMzWebViewClient(
             blocklist = blocklist,
@@ -79,6 +83,7 @@ class TabManagerViewModel : ViewModel() {
             onAdBlocked = onAdBlocked,
             onRedirectBlocked = onRedirectBlocked,
             onPageStartedCallback = { url ->
+                lastProgress = 15
                 updateTab(tabId) { it.copy(url = url, progress = 15) }
             },
             onVisitedHistoryCallback = { url ->
@@ -104,7 +109,12 @@ class TabManagerViewModel : ViewModel() {
         val chrome = AMzChromeClient(
             isAdShieldEnabled = isAdShieldEnabled,
             onProgressChangedCallback = { progress ->
-                updateTab(tabId) { it.copy(progress = progress) }
+                val significant = progress == 100 || progress < lastProgress ||
+                    progress - lastProgress >= 5
+                if (significant) {
+                    lastProgress = progress
+                    updateTab(tabId) { it.copy(progress = progress) }
+                }
             },
             onPopupBlocked = onPopupBlocked,
             onOpenNewTabRequest = { msg ->
