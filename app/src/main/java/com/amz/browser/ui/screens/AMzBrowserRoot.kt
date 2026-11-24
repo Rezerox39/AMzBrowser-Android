@@ -446,8 +446,8 @@ fun AMzBrowserRoot(
                         } else {
                             // Stable lambdas keep AndroidView from detaching/recreating
                             // the WebView on unrelated recompositions.
-                            val factory: () -> WebView = remember(wv, activeTab.id) {
-                                {
+                            val factory: (android.content.Context) -> WebView = remember(wv, activeTab.id) {
+                                { _ ->
                                     wv.also { view ->
                                         // A tab switch can reuse this instance; detach
                                         // it from the old Compose container first.
